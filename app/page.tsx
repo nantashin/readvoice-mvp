@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useSpeechRecognition } from "@/lib/speech/stt"
 import { useSpeechSynthesis } from "@/lib/speech/tts"
+import FileUpload from "@/app/components/FileUpload"
 
 function cleanDisplay(text: string): string {
   return text
@@ -150,7 +151,17 @@ export default function Home() {
 
       {stt.error && <p style={{ color:"#EF4444", marginTop:"1rem" }}>{stt.error}</p>}
 
-      <p style={{ marginTop:"3rem", color:"#94A3B8", fontSize:"0.8rem" }}>Space 키로도 마이크를 켜고 끌 수 있습니다</p>
+      <div style={{ marginTop:"2rem", width:"100%", maxWidth:"600px" }}>
+        <p style={{ color:"#0D9488", fontWeight:700, fontSize:"0.95rem", marginBottom:"0.75rem", textAlign:"center" }}>
+          📄 파일에서 텍스트 읽기 (이미지 / PDF)
+        </p>
+        <FileUpload
+          onResult={(text) => setResponse(text)}
+          onStatusChange={(s) => setStatus(s)}
+        />
+      </div>
+
+      <p style={{ marginTop:"2rem", color:"#94A3B8", fontSize:"0.8rem" }}>Space 키로도 마이크를 켜고 끌 수 있습니다</p>
     </main>
   )
 }
