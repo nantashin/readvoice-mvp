@@ -25,8 +25,9 @@ export async function POST(req: NextRequest) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
+    const model = (formData.get("model") as string) || "moondream"
 
-    const text = await extractText(buffer, file.type)
+    const text = await extractText(buffer, file.type, file.name, model as any)
 
     return NextResponse.json({ text })
   } catch (err) {
