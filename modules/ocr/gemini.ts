@@ -6,7 +6,13 @@ const anthropic = new Anthropic({
 })
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434"
-const OLLAMA_TIMEOUT = 30000 // 30초
+
+// 모델별 타임아웃 설정
+const MODEL_TIMEOUTS: Record<string, number> = {
+  moondream: 30000, // 30초
+  "llava": 60000, // 60초
+  "llama3.2-vision:11b-instruct-q4_K_M": 180000, // 180초 (3분)
+}
 
 type VisionModel = "moondream" | "llama-vision-q4" | "claude-haiku"
 
@@ -33,11 +39,12 @@ async function tryOllamaVision(
     console.log(`[OCR] Attempting Ollama ${modelName}...`)
     const base64Image = buffer.toString("base64")
     const prompt = `이 이미지를 시각장애인에게 설명해줘. 형식: '이것은 ${fileName}이라는 제목의 이미지로, [상세 묘사]입니다.' 한국어로 음성 읽기 쉽게.`
+    const timeout_ms = MODEL_TIMEOUTS[model] || 30000
 
     return await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Timeout after ${OLLAMA_TIMEOUT}ms`))
-      }, OLLAMA_TIMEOUT)
+        reject(new Error(`Timeout after ${timeout_ms}ms`))
+      }, timeout_ms)
 
       const options = {
         hostname: "localhost",
@@ -202,7 +209,7 @@ export async function extractTextFromImage(
 ): Promise<string> {
   console.log(`[OCR] Using model preference: ${preferredModel}`)
   console.log(`[OCR] Ollama base URL: ${OLLAMA_BASE_URL}`)
-  console.log(`[OCR] Timeout: ${OLLAMA_TIMEOUT}ms`)
+  console.log(`[OCR] Model-specific timeouts configured: moondream 30s, llava 60s, llama3.2-vision 180s`)
 
   if (!isValidApiKey(process.env.ANTHROPIC_API_KEY)) {
     console.warn("[OCR] ⚠ ANTHROPIC_API_KEY is not set or invalid. Claude models will be skipped.")
