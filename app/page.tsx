@@ -20,13 +20,43 @@ function cleanDisplay(text: string): string {
 type Status = "idle" | "listening" | "processing" | "speaking"
 
 export default function Home() {
-  const [status, setStatus]     = useState<Status>("idle")
-  const [response, setResponse] = useState("")
-  const [history, setHistory]   = useState<{role:string;content:string}[]>([])
-  const statusRef               = useRef<Status>("idle")
+  const [status, setStatus]               = useState<Status>("idle")
+  const [response, setResponse]           = useState("")
+  const [history, setHistory]             = useState<{role:string;content:string}[]>([])
+  const [speechRate, setSpeechRate]       = useState<number>(1.0)
+  const statusRef                         = useRef<Status>("idle")
+  const isWaitingSpeedChoiceRef           = useRef<boolean>(false)
 
   const stt = useSpeechRecognition()
   const tts = useSpeechSynthesis()
+
+  // localStorage에서 저장된 음성 속도 복원
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("speechRate")
+      if (saved) {
+        setSpeechRate(parseFloat(saved))
+      }
+    }
+  }, [])
+
+  // 첫 로딩 시 안내 음성 재생 (2초 후)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const hasGreeted = localStorage.getItem("rv-greeted")
+      if (!hasGreeted) {
+        const timer = setTimeout(() => {
+          tts.speak(
+            "안녕하세요. READ VOICE Pro입니다. " +
+            "마이크 버튼을 눌러 말씀하시면 됩니다. " +
+            "읽기 속도를 조절하려면 속도 조절이라고 말씀해 주세요."
+          )
+          localStorage.setItem("rv-greeted", "1")
+        }, 2000)
+        return () => clearTimeout(timer)
+      }
+    }
+  }, [tts])
 
   useEffect(() => { statusRef.current = status }, [status])
 
@@ -49,10 +79,46 @@ export default function Home() {
   }, [stt])
 
   const handleMic = useCallback(() => {
-    if (statusRef.current === "idle")      { startListening(); return }
-    if (statusRef.current === "listening") { stopListening();  return }
-    if (statusRef.current === "speaking")  { tts.stop(); setStatus("idle") }
+    if (statusRef.current === "idle") { startListening(); return }
+    if (statusRef.current === "listening") { stopListening(); return }
+    if (statusRef.current === "speaking") { tts.stop(); setStatus("idle") }
   }, [startListening, stopListening, tts])
+
+  const handleSpeechRateChange = useCallback((rate: number) => {
+    setSpeechRate(rate)
+    if (typeof window !== "undefined") {
+      localStorage.setItem("speechRate", rate.toString())
+    }
+  }, [])
+
+  // 음성 명령에서 속도 변경 명령 감지 및 확인 메시지 반환
+  const parseSpeedCommand = useCallback((text: string): { rate: number; message: string } | null => {
+    const lowerText = text.toLowerCase().trim()
+
+    // 속도 선택 대기 상태에서 번호 또는 숫자 단어로 파싱
+    if (isWaitingSpeedChoiceRef.current) {
+      if (lowerText.includes("1번") || lowerText.includes("하나")) {
+        return { rate: 1.0, message: "보통 속도로 설정했습니다." }
+      }
+      if (lowerText.includes("2번") || lowerText.includes("둘") || lowerText.includes("조금")) {
+        return { rate: 1.2, message: "조금 빠르게 설정했습니다." }
+      }
+      if (lowerText.includes("3번") || lowerText.includes("셋") || lowerText.includes("빠르게")) {
+        return { rate: 1.5, message: "빠르게 설정했습니다." }
+      }
+      if (lowerText.includes("4번") || lowerText.includes("넷") || lowerText.includes("매우")) {
+        return { rate: 2.0, message: "매우 빠르게 설정했습니다." }
+      }
+      return null
+    }
+
+    // 속도 선택 대기 상태가 아닐 때 직접 속도 명령 감지
+    if (lowerText.includes("속도 조절") || lowerText.includes("속도") || lowerText.includes("빠르기")) {
+      return { rate: -1, message: "speed_menu" }
+    }
+
+    return null
+  }, [])
 
   useEffect(() => {
     if (!stt.isListening && stt.transcript && statusRef.current === "listening") {
@@ -61,6 +127,26 @@ export default function Home() {
   }, [stt.isListening, stt.transcript])
 
   const sendMessage = async (text: string) => {
+    // 속도 변경 명령 확인
+    const speedCmd = parseSpeedCommand(text)
+    if (speedCmd !== null) {
+      // 속도 선택 메뉴 안내 필요
+      if (speedCmd.message === "speed_menu") {
+        setStatus("speaking")
+        const menu = "읽기 속도를 선택해 주세요. 1번, 보통 속도. 2번, 조금 빠르게. 3번, 빠르게. 4번, 매우 빠르게. 번호로 말씀해 주세요."
+        tts.speak(menu, 1.0)
+        isWaitingSpeedChoiceRef.current = true
+        return
+      }
+
+      // 속도 선택 대기 상태에서 번호 입력 받음
+      handleSpeechRateChange(speedCmd.rate)
+      setStatus("speaking")
+      tts.speak(speedCmd.message, 1.0)
+      isWaitingSpeedChoiceRef.current = false
+      return
+    }
+
     setStatus("processing")
     setResponse("")
     try {
@@ -81,11 +167,11 @@ export default function Home() {
       }
       setHistory(h => [...h, { role:"user", content:text }, { role:"assistant", content:full }])
       setStatus("speaking")
-      tts.speak(full)
+      tts.speak(full, speechRate)
     } catch {
       const err = "오류가 발생했습니다. 다시 시도해 주세요."
       setResponse(err)
-      tts.speak(err)
+      tts.speak(err, speechRate)
       setStatus("speaking")
     }
   }
@@ -106,62 +192,203 @@ export default function Home() {
   }, [handleMic])
 
   return (
-    <main style={{ minHeight:"100vh", background:"#EBF5FF", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"2rem", fontFamily:"Pretendard Variable, sans-serif" }}>
-      <h1 style={{ fontSize:"2rem", fontWeight:900, color:"#0284C7", marginBottom:"0.5rem" }}>READ VOICE Pro</h1>
-      <p style={{ color:"#475569", marginBottom:"2.5rem", fontSize:"1rem" }}>시각장애인을 위한 AI 음성 도우미</p>
+    <main style={{
+      minHeight:"100vh",
+      background:"#EBF5FF",
+      display:"flex",
+      flexDirection:"column",
+      alignItems:"center",
+      justifyContent:"center",
+      padding:"2rem 1.5rem",
+      fontFamily:"Pretendard Variable, sans-serif",
+    }}>
+      <div style={{
+        width:"100%",
+        maxWidth:"600px",
+        margin:"0 auto",
+        display:"flex",
+        flexDirection:"column",
+        alignItems:"center",
+      }}>
+        <h1 style={{
+          fontSize:"2.25rem",
+          fontWeight:900,
+          color:"#0284C7",
+          marginBottom:"0.5rem",
+          textAlign:"center",
+        }}>
+          READ VOICE Pro
+        </h1>
 
-      <button
-        onClick={handleMic}
-        aria-label={status === "listening" ? "마이크 중지" : "마이크 버튼, 눌러서 말하기"}
-        style={{
-          width:"120px", height:"120px", borderRadius:"50%",
-          background: status === "listening" ? "#EF4444" : "#0284C7",
-          border:"none", cursor:"pointer", fontSize:"3rem",
-          boxShadow:"0 8px 32px rgba(2,132,199,0.35)",
-          transition:"all 0.2s",
-        }}
-      >
-        {status === "listening" ? "⏹" : "🎙"}
-      </button>
-
-      <p aria-live="polite" style={{ marginTop:"1.5rem", color:"#0369A1", fontWeight:600, fontSize:"1.1rem" }}>
-        {statusLabel[status]}
-      </p>
-
-      {stt.transcript && (
-        <div style={{ marginTop:"1rem", background:"#DBEAFE", borderRadius:"0.75rem", padding:"1rem", maxWidth:"600px", width:"100%" }}>
-          <p style={{ color:"#1E3A5F", fontSize:"0.9rem" }}>인식: {stt.transcript}</p>
-        </div>
-      )}
-
-      {response && (
-        <div aria-live="polite" style={{ marginTop:"1rem", background:"white", borderRadius:"1rem", padding:"1.5rem", maxWidth:"600px", width:"100%", boxShadow:"0 4px 20px rgba(0,0,0,0.08)" }}>
-          <p style={{ color:"#1E3A5F", fontSize:"1.05rem", lineHeight:1.9, whiteSpace:"pre-wrap" }}>{cleanDisplay(response)}</p>
-          {status === "speaking" && (
-            <button
-              onClick={() => { tts.stop(); setStatus("idle") }}
-              aria-label="읽기 중지"
-              style={{ marginTop:"1rem", background:"#0D9488", color:"white", border:"none", borderRadius:"0.5rem", padding:"0.5rem 1rem", cursor:"pointer", fontSize:"0.9rem" }}
-            >
-              ⏹ 읽기 중지
-            </button>
-          )}
-        </div>
-      )}
-
-      {stt.error && <p style={{ color:"#EF4444", marginTop:"1rem" }}>{stt.error}</p>}
-
-      <div style={{ marginTop:"2rem", width:"100%", maxWidth:"600px" }}>
-        <p style={{ color:"#0D9488", fontWeight:700, fontSize:"0.95rem", marginBottom:"0.75rem", textAlign:"center" }}>
-          📄 파일에서 텍스트 읽기 (이미지 / PDF)
+        <p style={{
+          color:"#475569",
+          marginBottom:"2.5rem",
+          fontSize:"1.125rem",
+          textAlign:"center",
+        }}>
+          시각장애인을 위한 AI 음성 도우미
         </p>
-        <FileUpload
-          onResult={(text) => setResponse(text)}
-          onStatusChange={(s) => setStatus(s)}
-        />
-      </div>
 
-      <p style={{ marginTop:"2rem", color:"#94A3B8", fontSize:"0.8rem" }}>Space 키로도 마이크를 켜고 끌 수 있습니다</p>
+        <button
+          onClick={handleMic}
+          aria-label={status === "listening" ? "마이크 중지" : "마이크 버튼, 눌러서 말하기"}
+          style={{
+            width:"120px",
+            height:"120px",
+            borderRadius:"50%",
+            background: status === "listening" ? "#EF4444" : "#0284C7",
+            border:"none",
+            cursor:"pointer",
+            fontSize:"3rem",
+            boxShadow:"0 8px 32px rgba(2,132,199,0.35)",
+            transition:"all 0.2s",
+          }}
+        >
+          {status === "listening" ? "⏹" : "🎙"}
+        </button>
+
+        <div style={{
+          marginTop:"1.5rem",
+          display:"flex",
+          gap:"8px",
+          justifyContent:"center",
+          width:"100%",
+        }}>
+          {[1, 1.2, 1.5, 2].map((rate) => (
+            <button
+              key={rate}
+              onClick={() => handleSpeechRateChange(rate)}
+              aria-label={`읽기 속도 ${rate}배`}
+              style={{
+                minWidth:"48px",
+                minHeight:"48px",
+                padding:"8px 16px",
+                borderRadius:"8px",
+                border:"none",
+                cursor:"pointer",
+                fontWeight:600,
+                fontSize:"1rem",
+                transition:"all 0.2s",
+                background: speechRate === rate ? "#0284C7" : "#EBF5FF",
+                color: speechRate === rate ? "white" : "#0284C7",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+              }}
+            >
+              {rate}x
+            </button>
+          ))}
+        </div>
+
+        <p aria-live="polite" style={{
+          marginTop:"1.5rem",
+          color:"#0369A1",
+          fontWeight:600,
+          fontSize:"1.125rem",
+          textAlign:"center",
+        }}>
+          {statusLabel[status]}
+        </p>
+
+        {stt.transcript && (
+          <div style={{
+            marginTop:"1.5rem",
+            background:"#DBEAFE",
+            borderRadius:"0.75rem",
+            padding:"1rem",
+            width:"100%",
+          }}>
+            <p style={{
+              color:"#1E3A5F",
+              fontSize:"1rem",
+              margin:0,
+            }}>
+              인식: {stt.transcript}
+            </p>
+          </div>
+        )}
+
+        {response && (
+          <div aria-live="polite" style={{
+            marginTop:"1.5rem",
+            background:"white",
+            borderRadius:"1rem",
+            padding:"1.5rem",
+            width:"100%",
+            boxShadow:"0 4px 20px rgba(0,0,0,0.08)",
+          }}>
+            <p style={{
+              color:"#1E3A5F",
+              fontSize:"1.125rem",
+              lineHeight:1.9,
+              whiteSpace:"pre-wrap",
+              margin:0,
+            }}>
+              {cleanDisplay(response)}
+            </p>
+            {status === "speaking" && (
+              <button
+                onClick={() => { tts.stop(); setStatus("idle") }}
+                aria-label="읽기 중지"
+                style={{
+                  marginTop:"1rem",
+                  minWidth:"48px",
+                  minHeight:"48px",
+                  background:"#0D9488",
+                  color:"white",
+                  border:"none",
+                  borderRadius:"0.5rem",
+                  padding:"8px 16px",
+                  cursor:"pointer",
+                  fontSize:"1rem",
+                  fontWeight:600,
+                }}
+              >
+                ⏹ 읽기 중지
+              </button>
+            )}
+          </div>
+        )}
+
+        {stt.error && (
+          <p style={{
+            color:"#EF4444",
+            marginTop:"1rem",
+            fontSize:"1rem",
+          }}>
+            {stt.error}
+          </p>
+        )}
+
+        <div style={{
+          marginTop:"2rem",
+          width:"100%",
+        }}>
+          <p style={{
+            color:"#0D9488",
+            fontWeight:700,
+            fontSize:"1rem",
+            marginBottom:"0.75rem",
+            textAlign:"center",
+          }}>
+            📄 파일에서 텍스트 읽기 (이미지 / PDF)
+          </p>
+          <FileUpload
+            onResult={(text) => setResponse(text)}
+            onStatusChange={(s) => setStatus(s)}
+          />
+        </div>
+
+        <p style={{
+          marginTop:"2rem",
+          color:"#94A3B8",
+          fontSize:"0.95rem",
+          textAlign:"center",
+        }}>
+          Space 키로도 마이크를 켜고 끌 수 있습니다
+        </p>
+      </div>
     </main>
   )
 }

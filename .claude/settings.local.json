@@ -11,7 +11,8 @@
       "Bash(npm install:*)",
       "Bash(npx tsc:*)",
       "Bash(node:*)",
-      "Bash(grep -E '\\\\.\\(md|py\\)$')"
+      "Bash(grep -E '\\\\.\\(md|py\\)$')",
+      "Bash(npm uninstall:*)"
     ]
   }
 }

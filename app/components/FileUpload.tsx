@@ -1,5 +1,5 @@
 "use client"
-import { useRef, useState } from "react"
+import { useRef, useState, useEffect } from "react"
 import { useSpeechSynthesis } from "@/lib/speech/tts"
 
 const ACCEPT = "image/jpeg,image/png,image/webp,application/pdf"
@@ -9,7 +9,7 @@ interface FileUploadProps {
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
 
-type VisionModel = "moondream" | "llama-vision-q4" | "claude-haiku"
+type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-instruct-q4_K_M" | "claude"
 
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -17,17 +17,34 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
+  const [preview, setPreview] = useState<string>("")
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null)
+  const [uploadedBuffer, setUploadedBuffer] = useState<Buffer | null>(null)
   const tts = useSpeechSynthesis()
 
-  const handleFile = async (file: File) => {
+  const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
     setFileName(file.name)
     setLoading(true)
     onStatusChange("processing")
 
+    // 미리보기 생성
+    setPreview("")
+    if (file.type.startsWith("image/")) {
+      const objectURL = URL.createObjectURL(file)
+      setPreview(objectURL)
+    } else if (file.type === "application/pdf") {
+      setPreview(`📄 ${file.name}`)
+    }
+
+    // 파일 저장
+    setUploadedFile(file)
+    const buffer = await file.arrayBuffer()
+    setUploadedBuffer(Buffer.from(buffer))
+
     const formData = new FormData()
     formData.append("file", file)
-    formData.append("model", selectedModel)
+    formData.append("model", model || selectedModel)
 
     try {
       const res = await fetch("/api/ocr", { method: "POST", body: formData })
@@ -51,6 +68,11 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       onStatusChange("speaking")
     } finally {
       setLoading(false)
+      // 파일 재업로드를 위해 input value 초기화
+      if (inputRef.current) {
+        inputRef.current.value = ""
+      }
+      setFileName("")
     }
   }
 
@@ -71,6 +93,13 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       inputRef.current?.click()
     }
   }
+
+  // 모델 변경 시 자동 재분석
+  useEffect(() => {
+    if (uploadedFile && !loading) {
+      handleFile(uploadedFile, selectedModel)
+    }
+  }, [selectedModel])
 
   return (
     <div style={{ width: "100%", maxWidth: "600px" }}>
@@ -108,15 +137,18 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           }}
         >
           <option value="moondream">🌙 Moondream (빠름)</option>
-          <option value="llama-vision-q4">🦙 Llama Vision Q4 (정확)</option>
-          <option value="claude-haiku">☁️ Claude API</option>
+          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B Q4 (균형)</option>
+          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision Q4 (고품질)</option>
+          <option value="claude">☁️ Claude API (클라우드)</option>
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
           {selectedModel === "moondream"
             ? "로컬 실행, 가장 빠름"
-            : selectedModel === "llama-vision-q4"
-              ? "로컬 실행, 높은 정확도"
-              : "클라우드 API, 완벽한 분석 (인터넷 필요)"}
+            : selectedModel === "llava:7b-v1.5-q4_K_M"
+              ? "로컬 실행, 빠르고 정확함"
+              : selectedModel === "llama3.2-vision:11b-instruct-q4_K_M"
+                ? "로컬 실행, 높은 정확도"
+                : "클라우드 API, 완벽한 분석 (인터넷 필요)"}
         </p>
       </div>
 
@@ -138,6 +170,10 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           background: loading ? "#DBEAFE" : "#EBF5FF",
           transition: "background 0.2s",
           outline: "none",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
         }}
         onFocus={(e) => (e.currentTarget.style.boxShadow = "0 0 0 3px #0284C780")}
         onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
@@ -151,6 +187,26 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           aria-hidden="true"
           style={{ display: "none" }}
         />
+
+        {preview && preview.startsWith("data:image") && (
+          <img
+            src={preview}
+            alt="파일 미리보기"
+            style={{
+              maxHeight: "200px",
+              maxWidth: "100%",
+              borderRadius: "8px",
+              marginBottom: "1rem",
+              objectFit: "contain",
+            }}
+          />
+        )}
+
+        {preview && preview.startsWith("📄") && (
+          <p style={{ fontSize: "1rem", marginBottom: "1rem", color: "#1E3A5F" }}>
+            {preview}
+          </p>
+        )}
 
         <p style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
           {loading ? "⏳" : "📄"}
