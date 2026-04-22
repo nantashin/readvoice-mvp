@@ -40,6 +40,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const analysisTimerRef = useRef<NodeJS.Timeout | null>(null)
   const isFirstAnalysisRef = useRef(true)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -80,6 +81,15 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     const buffer = await file.arrayBuffer()
     setUploadedBuffer(Buffer.from(buffer))
 
+    // BGM 시작
+    tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
+    const audio = new Audio("/sounds/tomorrow-step.mp3")
+    audio.loop = true
+    audio.play().catch(() => {
+      console.log("[BGM] 재생 실패")
+    })
+    audioRef.current = audio
+
     // 분석 중 안내 타이머 설정
     isFirstAnalysisRef.current = true
     const startAnalysisReminder = () => {
@@ -109,6 +119,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         analysisTimerRef.current = null
       }
 
+      // BGM 정리
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
+
       if (!res.ok) {
         const msg = data.error ?? "파일 처리 중 오류가 발생했습니다."
         setError(msg)
@@ -129,6 +145,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       if (analysisTimerRef.current) {
         clearInterval(analysisTimerRef.current)
         analysisTimerRef.current = null
+      }
+
+      // BGM 정리
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
       }
 
       const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
@@ -221,11 +243,14 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     setCameraMode(false)
   }
 
-  // 컴포넌트 언마운트 시 카메라 종료
+  // 컴포넌트 언마운트 시 카메라 및 BGM 종료
   useEffect(() => {
     return () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop())
+      }
+      if (audioRef.current) {
+        audioRef.current.pause()
       }
     }
   }, [cameraStream])
