@@ -83,7 +83,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
     // BGM 시작
     tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
-    const audio = new Audio("/sounds/tomorrow-step.mp3")
+    const audio = new Audio("/sounds/One-step-for-a-better-me.mp3")
     audio.loop = true
     audio.play().catch(() => {
       console.log("[BGM] 재생 실패")

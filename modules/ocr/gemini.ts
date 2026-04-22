@@ -42,13 +42,14 @@ async function translateToKorean(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "exaone3.5:2.4b",
-        prompt: `다음 영어 이미지 설명을 한국어로 번역해줘.
+        prompt: `다음 영어 이미지 설명을 자연스러운 한국어로 번역해줘.
 
 규칙:
-1. 반드시 '파일명: ${fileName}'으로 시작
-2. 이미지에서 보이는 모든 텍스트를 정확히 그대로 인용
-3. 텍스트 → 인물/사물 → 배경 순서로 설명
-4. 자연스러운 한국어로 작성
+1. '파일명: ${fileName}' 으로 시작
+2. 섹션 구조 유지하되 자연스러운 한국어로
+3. 텍스트 섹션에서 이미지 속 글자는 원문 그대로 인용
+4. 배경 묘사 절대 생략 금지
+5. 시각장애인이 눈앞에 그림이 그려지도록 생생하게
 
 영어 설명: ${text}`,
         stream: false,
@@ -78,13 +79,14 @@ async function translateToKorean(
       messages: [
         {
           role: "user",
-          content: `다음 영어 이미지 설명을 한국어로 번역해줘.
+          content: `다음 영어 이미지 설명을 자연스러운 한국어로 번역해줘.
 
 규칙:
-1. 반드시 '파일명: ${fileName}'으로 시작
-2. 이미지에서 보이는 모든 텍스트를 정확히 그대로 인용
-3. 텍스트 → 인물/사물 → 배경 순서로 설명
-4. 자연스러운 한국어로 작성
+1. '파일명: ${fileName}' 으로 시작
+2. 섹션 구조 유지하되 자연스러운 한국어로
+3. 텍스트 섹션에서 이미지 속 글자는 원문 그대로 인용
+4. 배경 묘사 절대 생략 금지
+5. 시각장애인이 눈앞에 그림이 그려지도록 생생하게
 
 영어 설명: ${text}`,
         },
@@ -107,27 +109,56 @@ export async function extractTextFromImage(
   const name = fileName || "이미지"
   const base64 = buffer.toString("base64")
 
-  // Vision 프롬프트
-  const generalPrompt = `You are analyzing an image for a visually impaired person.
-IMPORTANT: Start your response with the filename immediately.
-Format: Start with 'The filename is ${name}.' as the FIRST sentence.
+  // moondream/llava 프롬프트
+  const moonDreamLlavaPrompt = `You are helping a blind person understand this image completely.
+Describe EVERYTHING you see in precise detail.
 
-Then describe in order:
-1. Any text visible in the image (read ALL text exactly as written, top to bottom)
-2. Main subject and people
-3. Colors, clothing, objects
-4. Background and setting
-5. Overall mood
+REQUIRED sections in this exact order:
+1. TEXT: List every single word, number, symbol visible in the image,
+   exactly as written, from top to bottom
+2. MAIN SUBJECT: Who or what is the central focus
+3. PEOPLE: Detailed description of each person
+   (clothing, posture, expression, hair, accessories)
+4. OBJECTS: Every significant object visible
+5. BACKGROUND: Describe the entire background scene in detail
+   (sky, buildings, nature, colors, lighting)
+6. COLORS: Dominant colors and color scheme
+7. MOOD: Overall atmosphere and feeling
 
-Be precise about text - read every word, number, and character you can see.`
+Do not skip any section. Be extremely specific.
+A blind person needs to visualize this completely.`
 
-  // OCR 전용 프롬프트 (llava, llama3.2-vision)
-  const ocrPrompt = `Read and transcribe ALL text visible in this image exactly as written.
-Include: numbers, letters, Korean characters, symbols.
-List them from top to bottom, left to right.
-Then describe the visual content.
+  // llama3.2-vision 프롬프트
+  const llamaVisionPrompt = `You are an expert image describer for visually impaired people.
+Analyze this image with maximum detail.
 
-Image filename: ${name}`
+Provide a structured description:
+
+SECTION 1 - ALL TEXT IN IMAGE:
+Read every word, number, and character visible, top to bottom,
+left to right. Quote them exactly.
+
+SECTION 2 - SCENE OVERVIEW:
+What type of image is this? What is the overall composition?
+
+SECTION 3 - PEOPLE & CHARACTERS:
+For each person: age appearance, clothing details, colors,
+accessories, posture, facial expression, what they are doing
+
+SECTION 4 - OBJECTS & DETAILS:
+List every significant object with its position and description
+
+SECTION 5 - BACKGROUND & SETTING:
+Describe the complete background - sky, environment,
+buildings, nature, time of day, weather if visible
+
+SECTION 6 - COLORS & LIGHTING:
+Describe the color palette and lighting conditions
+
+SECTION 7 - ATMOSPHERE:
+What feeling or story does this image convey?
+
+Be thorough. Leave nothing out.`
 
   const models =
     selectedModel && selectedModel !== "claude"
@@ -144,9 +175,11 @@ Image filename: ${name}`
     try {
       console.log(`[Vision] 시도: ${model}`)
       const timeout = timeouts[model] || 60000
-      // llava, llama3.2-vision은 OCR 프롬프트, 나머지는 일반 프롬프트
-      const isOcrModel = model === "llava:7b-v1.5-q4_K_M" || model === "llama3.2-vision:11b-instruct-q4_K_M"
-      const prompt = isOcrModel ? ocrPrompt : generalPrompt
+      // 모델별 프롬프트 선택
+      let prompt = moonDreamLlavaPrompt
+      if (model === "llama3.2-vision:11b-instruct-q4_K_M") {
+        prompt = llamaVisionPrompt
+      }
       const englishResult = await callOllamaVision(
         model,
         base64,
@@ -188,15 +221,35 @@ Image filename: ${name}`
             },
             {
               type: "text",
-              text: `파일명: ${name}
+              text: `당신은 시각장애인을 위한 이미지 설명 전문가입니다.
+이 이미지를 머릿속에 완전히 그릴 수 있도록 상세히 설명해주세요.
 
-이 이미지를 시각장애인을 위해 한국어로 자세히 설명해줘.
-순서:
-1. 이미지에서 보이는 모든 텍스트 (정확히 그대로)
-2. 주요 대상과 인물
-3. 색상, 옷, 사물
-4. 배경과 환경
-5. 전체 분위기`,
+반드시 아래 순서로 설명하세요:
+
+1. 이미지 속 모든 텍스트:
+   보이는 모든 글자, 숫자, 기호를 위에서 아래로 정확히 읽기
+
+2. 전체 구도:
+   이미지의 전반적인 구성과 종류
+
+3. 인물/캐릭터:
+   각 인물의 의상 색상과 스타일, 자세, 표정, 머리 스타일,
+   소품, 하고 있는 행동을 구체적으로
+
+4. 사물과 소품:
+   눈에 띄는 모든 사물과 위치
+
+5. 배경:
+   하늘, 건물, 자연환경, 빛의 방향, 시간대, 색감을 구체적으로
+
+6. 색상:
+   주요 색상들과 전체적인 색감
+
+7. 분위기:
+   이 이미지가 전달하는 감정과 이야기
+
+파일명 ${name}의 이미지입니다.
+배경 묘사를 절대 생략하지 마세요.`,
             },
           ],
         },
