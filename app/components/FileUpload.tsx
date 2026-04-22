@@ -13,29 +13,37 @@ type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-i
 
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
-  const [preview, setPreview] = useState<string>("")
+  const [previewUrl, setPreviewUrl] = useState<string>("")
+  const [previewType, setPreviewType] = useState<"image" | "pdf" | "">("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [uploadedBuffer, setUploadedBuffer] = useState<Buffer | null>(null)
+  const [cameraMode, setCameraMode] = useState(false)
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const tts = useSpeechSynthesis()
 
   const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
     setFileName(file.name)
+
+    // 파일 선택 시에만 미리보기 설정 (model 파라미터가 없을 때)
+    if (!model) {
+      if (file.type.startsWith("image/")) {
+        setPreviewUrl(URL.createObjectURL(file))
+        setPreviewType("image")
+      } else if (file.type === "application/pdf") {
+        setPreviewUrl("")
+        setPreviewType("pdf")
+      }
+    }
+
     setLoading(true)
     onStatusChange("processing")
-
-    // 미리보기 생성
-    setPreview("")
-    if (file.type.startsWith("image/")) {
-      const objectURL = URL.createObjectURL(file)
-      setPreview(objectURL)
-    } else if (file.type === "application/pdf") {
-      setPreview(`📄 ${file.name}`)
-    }
 
     // 파일 저장
     setUploadedFile(file)
@@ -93,6 +101,80 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       inputRef.current?.click()
     }
   }
+
+  const startCamera = async () => {
+    try {
+      tts.speak("카메라 촬영 모드입니다. 문서나 사진을 화면 하단 오른쪽 촬영 영역에 놓아주세요. 자동으로 인식합니다.")
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
+      })
+      setCameraStream(stream)
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+      }
+      setCameraMode(true)
+    } catch (e) {
+      const msg = "카메라 접근이 거부되었습니다."
+      setError(msg)
+      tts.speak(msg)
+      console.error("[카메라]", e)
+    }
+  }
+
+  const captureFromCamera = async () => {
+    if (!videoRef.current || !canvasRef.current) return
+    try {
+      const context = canvasRef.current.getContext("2d")
+      if (!context) return
+
+      canvasRef.current.width = videoRef.current.videoWidth
+      canvasRef.current.height = videoRef.current.videoHeight
+      context.drawImage(videoRef.current, 0, 0)
+
+      canvasRef.current.toBlob(async (blob) => {
+        if (!blob) return
+        const file = new File([blob], "camera-capture.jpg", { type: "image/jpeg" })
+
+        // 카메라 종료
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop())
+          setCameraStream(null)
+        }
+        setCameraMode(false)
+
+        // 파일 처리
+        await handleFile(file)
+      }, "image/jpeg")
+    } catch (e) {
+      console.error("[캡처 오류]", e)
+      tts.speak("캡처 중 오류가 발생했습니다.")
+    }
+  }
+
+  // 카메라 모드 종료
+  const closeCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop())
+      setCameraStream(null)
+    }
+    setCameraMode(false)
+  }
+
+  // 컴포넌트 언마운트 시 카메라 종료
+  useEffect(() => {
+    return () => {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop())
+      }
+    }
+  }, [cameraStream])
+
+  // 카메라 모드 5초 후 자동 촬영
+  useEffect(() => {
+    if (!cameraMode) return
+    const timer = setTimeout(captureFromCamera, 5000)
+    return () => clearTimeout(timer)
+  }, [cameraMode])
 
   // 모델 변경 시 자동 재분석
   useEffect(() => {
@@ -188,24 +270,22 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           style={{ display: "none" }}
         />
 
-        {preview && preview.startsWith("data:image") && (
+        {previewType === "image" && previewUrl && (
           <img
-            src={preview}
-            alt="파일 미리보기"
+            src={previewUrl}
+            alt="업로드된 이미지"
             style={{
               maxHeight: "200px",
               maxWidth: "100%",
               borderRadius: "8px",
-              marginBottom: "1rem",
+              marginBottom: "8px",
               objectFit: "contain",
             }}
           />
         )}
 
-        {preview && preview.startsWith("📄") && (
-          <p style={{ fontSize: "1rem", marginBottom: "1rem", color: "#1E3A5F" }}>
-            {preview}
-          </p>
+        {previewType === "pdf" && (
+          <div style={{ fontSize: "48px", marginBottom: "8px" }}>📄</div>
         )}
 
         <p style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>
@@ -231,6 +311,90 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         >
           {error}
         </p>
+      )}
+
+      {/* 카메라 촬영 버튼 */}
+      <button
+        onClick={startCamera}
+        disabled={loading || cameraMode}
+        aria-label="카메라로 촬영"
+        style={{
+          width: "100%",
+          marginTop: "1rem",
+          padding: "0.75rem",
+          borderRadius: "0.5rem",
+          border: "2px solid #0D9488",
+          background: loading || cameraMode ? "#f5f5f5" : "white",
+          color: "#0D9488",
+          fontSize: "1rem",
+          fontWeight: 600,
+          cursor: loading || cameraMode ? "not-allowed" : "pointer",
+          opacity: loading || cameraMode ? 0.6 : 1,
+        }}
+      >
+        📷 카메라로 촬영
+      </button>
+
+      {/* 카메라 모드 */}
+      {cameraMode && (
+        <div style={{
+          marginTop: "1rem",
+          padding: "1rem",
+          background: "#f0f0f0",
+          borderRadius: "1rem",
+          textAlign: "center",
+        }}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            style={{
+              width: "100%",
+              maxHeight: "300px",
+              borderRadius: "0.5rem",
+              marginBottom: "1rem",
+              background: "#000",
+            }}
+          />
+          <canvas ref={canvasRef} style={{ display: "none" }} />
+
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              onClick={captureFromCamera}
+              aria-label="촬영"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: "none",
+                background: "#0D9488",
+                color: "white",
+                fontSize: "1rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              📸 촬영
+            </button>
+            <button
+              onClick={closeCamera}
+              aria-label="취소"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: "2px solid #0D9488",
+                background: "white",
+                color: "#0D9488",
+                fontSize: "1rem",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ✕ 취소
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )

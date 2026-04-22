@@ -12,7 +12,8 @@
       "Bash(npx tsc:*)",
       "Bash(node:*)",
       "Bash(grep -E '\\\\.\\(md|py\\)$')",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "Bash(taskkill:*)"
     ]
   }
 }

@@ -26,6 +26,7 @@ export default function Home() {
   const [speechRate, setSpeechRate]       = useState<number>(1.0)
   const statusRef                         = useRef<Status>("idle")
   const isWaitingSpeedChoiceRef           = useRef<boolean>(false)
+  const hasPlayedGreetingRef              = useRef<boolean>(false)
 
   const stt = useSpeechRecognition()
   const tts = useSpeechSynthesis()
@@ -40,23 +41,27 @@ export default function Home() {
     }
   }, [])
 
-  // 첫 로딩 시 안내 음성 재생 (2초 후)
+  // 음성 안내 - 브라우저 자동재생 정책 우회
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const hasGreeted = localStorage.getItem("rv-greeted")
-      if (!hasGreeted) {
-        const timer = setTimeout(() => {
-          tts.speak(
-            "안녕하세요. READ VOICE Pro입니다. " +
-            "마이크 버튼을 눌러 말씀하시면 됩니다. " +
-            "읽기 속도를 조절하려면 속도 조절이라고 말씀해 주세요."
-          )
-          localStorage.setItem("rv-greeted", "1")
-        }, 2000)
-        return () => clearTimeout(timer)
-      }
+    const tryPlay = () => {
+      const utt = new SpeechSynthesisUtterance(
+        "안녕하세요. READ VOICE Pro입니다. " +
+        "스페이스바를 누르고 말씀하시면 됩니다. " +
+        "읽기 속도를 조절하려면 속도 조절이라고 말씀해 주세요."
+      )
+      utt.lang = "ko-KR"
+      utt.rate = 1.0
+      window.speechSynthesis.speak(utt)
     }
-  }, [tts])
+
+    // 즉시 시도
+    setTimeout(tryPlay, 500)
+
+    // 실패 대비: 첫 클릭 시 재시도
+    const onFirst = () => { tryPlay(); document.removeEventListener('click', onFirst) }
+    document.addEventListener('click', onFirst)
+    return () => document.removeEventListener('click', onFirst)
+  }, [])
 
   useEffect(() => { statusRef.current = status }, [status])
 
@@ -69,9 +74,10 @@ export default function Home() {
 
   const startListening = useCallback(() => {
     if (statusRef.current !== "idle") return
+    tts.speak("듣고 있습니다", 1.0)
     stt.startListening()
     setStatus("listening")
-  }, [stt])
+  }, [stt, tts])
 
   const stopListening = useCallback(() => {
     stt.stopListening()
@@ -97,16 +103,16 @@ export default function Home() {
 
     // 속도 선택 대기 상태에서 번호 또는 숫자 단어로 파싱
     if (isWaitingSpeedChoiceRef.current) {
-      if (lowerText.includes("1번") || lowerText.includes("하나")) {
+      if (lowerText.includes("일번") || lowerText.includes("1번") || lowerText.includes("하나")) {
         return { rate: 1.0, message: "보통 속도로 설정했습니다." }
       }
-      if (lowerText.includes("2번") || lowerText.includes("둘") || lowerText.includes("조금")) {
+      if (lowerText.includes("이번") || lowerText.includes("2번") || lowerText.includes("둘") || lowerText.includes("조금")) {
         return { rate: 1.2, message: "조금 빠르게 설정했습니다." }
       }
-      if (lowerText.includes("3번") || lowerText.includes("셋") || lowerText.includes("빠르게")) {
+      if (lowerText.includes("삼번") || lowerText.includes("3번") || lowerText.includes("셋") || lowerText.includes("빠르게")) {
         return { rate: 1.5, message: "빠르게 설정했습니다." }
       }
-      if (lowerText.includes("4번") || lowerText.includes("넷") || lowerText.includes("매우")) {
+      if (lowerText.includes("사번") || lowerText.includes("4번") || lowerText.includes("넷") || lowerText.includes("매우")) {
         return { rate: 2.0, message: "매우 빠르게 설정했습니다." }
       }
       return null
