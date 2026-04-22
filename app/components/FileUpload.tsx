@@ -14,22 +14,22 @@ type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-i
 const modelGuides: Record<VisionModel, { desc: string; time: string; name: string }> = {
   "moondream": {
     name: "문드림",
-    desc: "문드림 모델입니다. 사진이나 풍경 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
+    desc: "문드림 모델입니다. 간단한 사진 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
     time: "5~15초",
   },
   "llava:7b-v1.5-q4_K_M": {
     name: "라바",
-    desc: "라바 모델입니다. 텍스트가 포함된 이미지 분석에 적합하며 약 30초에서 1분 정도 걸립니다.",
-    time: "30초~1분",
+    desc: "라바 모델입니다. 참고용이며 정확도가 낮습니다. 약 10초에서 15초 정도 걸립니다.",
+    time: "10~15초",
   },
   "llama3.2-vision:11b-instruct-q4_K_M": {
     name: "라마 비전",
-    desc: "라마 비전 모델입니다. 문서와 정밀 분석에 가장 정확하며 약 1분에서 3분 정도 걸립니다.",
+    desc: "라마 비전 모델입니다. 텍스트와 배경까지 가장 정확하게 묘사합니다. 약 1분에서 3분 정도 걸립니다.",
     time: "1~3분",
   },
   "claude": {
     name: "클로드",
-    desc: "클로드 클라우드 모델입니다. 가장 정확하며 인터넷 연결이 필요합니다. 약 3초에서 10초 걸립니다.",
+    desc: "클로드 모델입니다. 빠르게 분석하며 약 3초에서 10초 걸립니다.",
     time: "3~10초",
   },
 }
@@ -309,19 +309,13 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          <option value="moondream">🌙 Moondream — 사진/풍경 묘사 (5~15초)</option>
-          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B — 텍스트 포함 이미지 (30초~1분)</option>
-          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision — 문서/정밀 분석 (1~3분)</option>
-          <option value="claude">☁️ Claude API — 최고 정확도 (3~10초)</option>
+          <option value="moondream">🌙 Moondream — 간단한 사진 묘사 (5~15초)</option>
+          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B — 참고용, 정확도 낮음 (10~15초)</option>
+          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision — 가장 정확한 묘사 (1~3분) ← 권장</option>
+          <option value="claude">☁️ Claude API — 빠른 분석 (3~10초)</option>
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {selectedModel === "moondream"
-            ? "문드림 모델입니다. 사진이나 풍경 묘사에 적합하며 약 5초에서 15초 정도 걸립니다."
-            : selectedModel === "llava:7b-v1.5-q4_K_M"
-              ? "라바 모델입니다. 텍스트가 포함된 이미지 분석에 적합하며 약 30초에서 1분 정도 걸립니다."
-              : selectedModel === "llama3.2-vision:11b-instruct-q4_K_M"
-                ? "라마 비전 모델입니다. 문서와 정밀 분석에 가장 정확하며 약 1분에서 3분 정도 걸립니다."
-                : "클로드 클라우드 모델입니다. 가장 정확하며 인터넷 연결이 필요합니다. 약 3초에서 10초 걸립니다."}
+          {modelGuides[selectedModel].desc}
         </p>
       </div>
 
