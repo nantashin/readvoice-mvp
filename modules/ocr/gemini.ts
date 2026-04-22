@@ -31,6 +31,11 @@ async function callOllamaVision(
   }
 }
 
+function hasEnglish(text: string): boolean {
+  const englishWords = text.match(/\b[a-zA-Z]{3,}\b/g) || []
+  return englishWords.length > 5
+}
+
 async function translateToKorean(
   text: string,
   fileName: string
@@ -59,11 +64,11 @@ async function translateToKorean(
     const data = await res.json()
     const result = data.response?.trim()
     const koreanCount = (result?.match(/[가-힣]/g) || []).length
-    if (result && koreanCount > 5) {
+    if (result && koreanCount > 5 && !hasEnglish(result)) {
       console.log("[번역] EXAONE 성공")
       return result
     }
-    console.log("[번역] EXAONE 한국어 부족, Claude로 전환")
+    console.log("[번역] EXAONE 한국어 부족 또는 영어 잔존, Claude로 전환")
   } catch (e) {
     console.log("[번역] EXAONE 실패:", e)
   }
@@ -109,24 +114,25 @@ export async function extractTextFromImage(
   const name = fileName || "이미지"
   const base64 = buffer.toString("base64")
 
-  // moondream/llava 프롬프트
-  const moonDreamLlavaPrompt = `You are helping a blind person understand this image completely.
-Describe EVERYTHING you see in precise detail.
+  // moondream 프롬프트
+  const moondreamPrompt = `Describe this image in detail for a blind person.
+List ALL text visible first, then describe the scene,
+people, colors, objects, and background.`
 
-REQUIRED sections in this exact order:
-1. TEXT: List every single word, number, symbol visible in the image,
-   exactly as written, from top to bottom
-2. MAIN SUBJECT: Who or what is the central focus
-3. PEOPLE: Detailed description of each person
-   (clothing, posture, expression, hair, accessories)
-4. OBJECTS: Every significant object visible
-5. BACKGROUND: Describe the entire background scene in detail
-   (sky, buildings, nature, colors, lighting)
-6. COLORS: Dominant colors and color scheme
-7. MOOD: Overall atmosphere and feeling
+  // qwen2.5vl 프롬프트 (OCR 특화)
+  const qwen2_5vlPrompt = `You are an expert OCR and image description system.
+STEP 1 - READ ALL TEXT: Extract every single character,
+word, number, symbol visible in this image exactly as written.
+List from top-left to bottom-right.
+STEP 2 - DESCRIBE SCENE: Full visual description including
+people, clothing, colors, background, atmosphere.
+Be extremely detailed. Output in English.`
 
-Do not skip any section. Be extremely specific.
-A blind person needs to visualize this completely.`
+  // gemma3 프롬프트
+  const gemma3Prompt = `Analyze this image completely for a visually impaired person.
+First: transcribe ALL visible text exactly.
+Then: describe people, objects, colors, background, and mood
+in vivid detail so the person can visualize it clearly.`
 
   // llama3.2-vision 프롬프트
   const llamaVisionPrompt = `You are an expert image describer for visually impaired people.
@@ -176,8 +182,12 @@ Be thorough. Leave nothing out.`
       console.log(`[Vision] 시도: ${model}`)
       const timeout = timeouts[model] || 60000
       // 모델별 프롬프트 선택
-      let prompt = moonDreamLlavaPrompt
-      if (model === "llama3.2-vision:11b-instruct-q4_K_M") {
+      let prompt = moondreamPrompt
+      if (model === "qwen2.5vl:7b") {
+        prompt = qwen2_5vlPrompt
+      } else if (model === "gemma3:4b") {
+        prompt = gemma3Prompt
+      } else if (model === "llama3.2-vision:11b-instruct-q4_K_M") {
         prompt = llamaVisionPrompt
       }
       const englishResult = await callOllamaVision(

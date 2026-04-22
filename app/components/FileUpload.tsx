@@ -9,30 +9,35 @@ interface FileUploadProps {
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
 
-type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-instruct-q4_K_M" | "claude"
+type VisionModel = "moondream" | "qwen2.5vl:7b" | "gemma3:4b" | "llama3.2-vision:11b-instruct-q4_K_M" | "claude"
 
-const modelGuides: Record<VisionModel, { desc: string; time: string; name: string }> = {
-  "moondream": {
-    name: "문드림",
-    desc: "문드림 모델입니다. 달의 꿈이라는 뜻으로, 간단한 사진 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
-    time: "5~15초",
+const MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
+  {
+    id: "moondream",
+    label: "🌙 Moondream — 간단한 사진 (5~15초)",
+    tts: "문드림 모델입니다. 달의 꿈이라는 뜻으로 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다."
   },
-  "llava:7b-v1.5-q4_K_M": {
-    name: "라바",
-    desc: "라바 모델입니다. 참고용이며 정확도가 낮습니다. 약 10초에서 15초 정도 걸립니다.",
-    time: "10~15초",
+  {
+    id: "qwen2.5vl:7b",
+    label: "💎 Qwen2.5-VL — OCR+한국어 최강 (20~40초)",
+    tts: "큰 2.5 비엘 모델입니다. 텍스트와 한국어 인식이 가장 뛰어나며 약 20초에서 40초 걸립니다."
   },
-  "llama3.2-vision:11b-instruct-q4_K_M": {
-    name: "라마 비전",
-    desc: "라마 비전 모델입니다. 텍스트와 배경까지 가장 정확하게 묘사합니다. 약 1분에서 3분 정도 걸립니다.",
-    time: "1~3분",
+  {
+    id: "gemma3:4b",
+    label: "🔮 Gemma3 — 빠르고 정확 (10~20초)",
+    tts: "구글 젬마3 모델입니다. 빠르고 정확한 이미지 분석을 제공하며 약 10초에서 20초 걸립니다."
   },
-  "claude": {
-    name: "클로드",
-    desc: "클로드 모델입니다. 빠르게 분석하며 약 3초에서 10초 걸립니다.",
-    time: "3~10초",
+  {
+    id: "llama3.2-vision:11b-instruct-q4_K_M",
+    label: "🦙 Llama Vision — 상세 묘사 (1~3분)",
+    tts: "라마 비전 모델입니다. 배경과 분위기까지 가장 상세하게 묘사하며 약 1분에서 3분 걸립니다."
   },
-}
+  {
+    id: "claude",
+    label: "☁️ Claude API — 클라우드 (3~10초)",
+    tts: "클로드 클라우드 모델입니다. 인터넷 연결이 필요하며 약 3초에서 10초 걸립니다."
+  }
+]
 
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -44,7 +49,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
+  const [selectedModel, setSelectedModel] = useState<VisionModel>("qwen2.5vl:7b")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [previewType, setPreviewType] = useState<"image" | "pdf" | "">("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -69,8 +74,10 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       }
 
       // 파일 선택 시 TTS 안내
-      const guide = modelGuides[currentModel]
-      tts.speak(`${file.name} 파일이 선택되었습니다. ${guide.name} 모델로 분석합니다. 약 ${guide.time} 정도 걸립니다. 잠시 기다려 주세요.`)
+      const model = MODELS.find(m => m.id === currentModel)
+      if (model) {
+        tts.speak(`${file.name} 파일이 선택되었습니다. ${model.tts}`)
+      }
     }
 
     setLoading(true)
@@ -289,10 +296,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           id="vision-model"
           value={selectedModel}
           onChange={(e) => {
-            const model = e.target.value as VisionModel
-            setSelectedModel(model)
-            const guide = modelGuides[model]
-            tts.speak(`${guide.name} 모델로 변경되었습니다. ${guide.desc}`)
+            const modelId = e.target.value as VisionModel
+            setSelectedModel(modelId)
+            const model = MODELS.find(m => m.id === modelId)
+            if (model) {
+              tts.speak(`${modelId} 모델로 변경되었습니다. ${model.tts}`)
+            }
           }}
           disabled={loading}
           aria-label="이미지 분석에 사용할 모델을 선택하세요"
@@ -309,13 +318,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          <option value="moondream">🌙 Moondream — 간단한 사진 묘사 (5~15초)</option>
-          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B — 참고용, 정확도 낮음 (10~15초)</option>
-          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision — 가장 정확한 묘사 (1~3분) ← 권장</option>
-          <option value="claude">☁️ Claude API — 빠른 분석 (3~10초)</option>
+          {MODELS.map(model => (
+            <option key={model.id} value={model.id}>{model.label}</option>
+          ))}
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {modelGuides[selectedModel].desc}
+          {MODELS.find(m => m.id === selectedModel)?.tts}
         </p>
       </div>
 
