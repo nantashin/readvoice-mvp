@@ -2,7 +2,7 @@ import fs from "fs"
 import path from "path"
 
 const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_PATH ||
-  "C:/Users/tara0/ReadVoice_업로드"
+  "C:/Users/tara0/ReadVoice_Upload"
 
 export async function GET() {
   try {
