@@ -47,7 +47,12 @@ export default function Home() {
       const utt = new SpeechSynthesisUtterance(
         "안녕하세요. READ VOICE Pro입니다. " +
         "스페이스바를 누르고 말씀하시면 됩니다. " +
-        "읽기 속도를 조절하려면 속도 조절이라고 말씀해 주세요."
+        "무엇을 도와드릴까요? " +
+        "일번 웹 검색, " +
+        "이번 사진이나 문서 읽어들이기, " +
+        "삼번 메뉴 선택하기, " +
+        "사번 근처 복지관 및 지원 기관 안내, " +
+        "오번 처음으로 돌아가기."
       )
       utt.lang = "ko-KR"
       utt.rate = 1.0
@@ -187,9 +192,12 @@ export default function Home() {
   }, [tts.isSpeaking])
 
   // 스페이스바 — statusRef로 항상 최신 상태 참조
+  // input/textarea/select 제외, 다른 곳에서는 항상 마이크 제어
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.code !== "Space" || e.target !== document.body) return
+      if (e.code !== "Space") return
+      const tag = (e.target as HTMLElement).tagName
+      if (['INPUT','TEXTAREA','SELECT'].includes(tag)) return
       e.preventDefault()
       handleMic()
     }
