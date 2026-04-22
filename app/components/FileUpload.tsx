@@ -14,7 +14,7 @@ type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-i
 const modelGuides: Record<VisionModel, { desc: string; time: string; name: string }> = {
   "moondream": {
     name: "문드림",
-    desc: "문드림 모델입니다. 간단한 사진 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
+    desc: "문드림 모델입니다. 달의 꿈이라는 뜻으로, 간단한 사진 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
     time: "5~15초",
   },
   "llava:7b-v1.5-q4_K_M": {
