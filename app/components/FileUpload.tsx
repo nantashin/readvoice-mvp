@@ -11,10 +11,35 @@ interface FileUploadProps {
 
 type VisionModel = "moondream" | "llava:7b-v1.5-q4_K_M" | "llama3.2-vision:11b-instruct-q4_K_M" | "claude"
 
+const modelGuides: Record<VisionModel, { desc: string; time: string; name: string }> = {
+  "moondream": {
+    name: "문드림",
+    desc: "문드림 모델입니다. 사진이나 풍경 묘사에 적합하며 약 5초에서 15초 정도 걸립니다.",
+    time: "5~15초",
+  },
+  "llava:7b-v1.5-q4_K_M": {
+    name: "라바",
+    desc: "라바 모델입니다. 텍스트가 포함된 이미지 분석에 적합하며 약 30초에서 1분 정도 걸립니다.",
+    time: "30초~1분",
+  },
+  "llama3.2-vision:11b-instruct-q4_K_M": {
+    name: "라마 비전",
+    desc: "라마 비전 모델입니다. 문서와 정밀 분석에 가장 정확하며 약 1분에서 3분 정도 걸립니다.",
+    time: "1~3분",
+  },
+  "claude": {
+    name: "클로드",
+    desc: "클로드 클라우드 모델입니다. 가장 정확하며 인터넷 연결이 필요합니다. 약 3초에서 10초 걸립니다.",
+    time: "3~10초",
+  },
+}
+
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const analysisTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isFirstAnalysisRef = useRef(true)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -30,6 +55,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
     setFileName(file.name)
+    const currentModel = model || selectedModel
 
     // 파일 선택 시에만 미리보기 설정 (model 파라미터가 없을 때)
     if (!model) {
@@ -40,6 +66,10 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         setPreviewUrl("")
         setPreviewType("pdf")
       }
+
+      // 파일 선택 시 TTS 안내
+      const guide = modelGuides[currentModel]
+      tts.speak(`${file.name} 파일이 선택되었습니다. ${guide.name} 모델로 분석합니다. 약 ${guide.time} 정도 걸립니다. 잠시 기다려 주세요.`)
     }
 
     setLoading(true)
@@ -50,13 +80,34 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     const buffer = await file.arrayBuffer()
     setUploadedBuffer(Buffer.from(buffer))
 
+    // 분석 중 안내 타이머 설정
+    isFirstAnalysisRef.current = true
+    const startAnalysisReminder = () => {
+      if (isFirstAnalysisRef.current) {
+        isFirstAnalysisRef.current = false
+        tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
+        // 30초마다 반복
+        analysisTimerRef.current = setInterval(() => {
+          tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
+        }, 30000)
+      }
+    }
+    const initialTimer = setTimeout(startAnalysisReminder, 5000)
+
     const formData = new FormData()
     formData.append("file", file)
-    formData.append("model", model || selectedModel)
+    formData.append("model", currentModel)
 
     try {
       const res = await fetch("/api/ocr", { method: "POST", body: formData })
       const data = await res.json()
+
+      // 타이머 정리
+      clearTimeout(initialTimer)
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
 
       if (!res.ok) {
         const msg = data.error ?? "파일 처리 중 오류가 발생했습니다."
@@ -66,10 +117,20 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         return
       }
 
+      // 분석 완료 안내
+      tts.speak("분석이 완료되었습니다. 읽어드리겠습니다.")
+
       onResult(data.text)
       onStatusChange("speaking")
       tts.speak(data.text)
     } catch {
+      // 타이머 정리
+      clearTimeout(initialTimer)
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
+
       const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
       setError(msg)
       tts.speak(msg)
@@ -202,7 +263,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         <select
           id="vision-model"
           value={selectedModel}
-          onChange={(e) => setSelectedModel(e.target.value as VisionModel)}
+          onChange={(e) => {
+            const model = e.target.value as VisionModel
+            setSelectedModel(model)
+            const guide = modelGuides[model]
+            tts.speak(`${guide.name} 모델로 변경되었습니다. ${guide.desc}`)
+          }}
           disabled={loading}
           aria-label="이미지 분석에 사용할 모델을 선택하세요"
           style={{
@@ -218,19 +284,19 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          <option value="moondream">🌙 Moondream (빠름)</option>
-          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B Q4 (균형)</option>
-          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision Q4 (고품질)</option>
-          <option value="claude">☁️ Claude API (클라우드)</option>
+          <option value="moondream">🌙 Moondream — 사진/풍경 묘사 (5~15초)</option>
+          <option value="llava:7b-v1.5-q4_K_M">🌋 LLaVA 7B — 텍스트 포함 이미지 (30초~1분)</option>
+          <option value="llama3.2-vision:11b-instruct-q4_K_M">🦙 Llama Vision — 문서/정밀 분석 (1~3분)</option>
+          <option value="claude">☁️ Claude API — 최고 정확도 (3~10초)</option>
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
           {selectedModel === "moondream"
-            ? "로컬 실행, 가장 빠름"
+            ? "문드림 모델입니다. 사진이나 풍경 묘사에 적합하며 약 5초에서 15초 정도 걸립니다."
             : selectedModel === "llava:7b-v1.5-q4_K_M"
-              ? "로컬 실행, 빠르고 정확함"
+              ? "라바 모델입니다. 텍스트가 포함된 이미지 분석에 적합하며 약 30초에서 1분 정도 걸립니다."
               : selectedModel === "llama3.2-vision:11b-instruct-q4_K_M"
-                ? "로컬 실행, 높은 정확도"
-                : "클라우드 API, 완벽한 분석 (인터넷 필요)"}
+                ? "라마 비전 모델입니다. 문서와 정밀 분석에 가장 정확하며 약 1분에서 3분 정도 걸립니다."
+                : "클로드 클라우드 모델입니다. 가장 정확하며 인터넷 연결이 필요합니다. 약 3초에서 10초 걸립니다."}
         </p>
       </div>
 
