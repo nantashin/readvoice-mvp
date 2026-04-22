@@ -1,0 +1,27 @@
+import fs from "fs"
+import path from "path"
+
+const UPLOAD_FOLDER = process.env.UPLOAD_FOLDER_PATH ||
+  "C:/Users/tara0/ReadVoice_업로드"
+
+export async function GET() {
+  try {
+    // 폴더 없으면 자동 생성
+    if (!fs.existsSync(UPLOAD_FOLDER)) {
+      fs.mkdirSync(UPLOAD_FOLDER, { recursive: true })
+    }
+
+    const files = fs.readdirSync(UPLOAD_FOLDER)
+      .filter(f => /\.(jpg|jpeg|png|webp|pdf)$/i.test(f))
+      .map(f => ({
+        name: f,
+        path: path.join(UPLOAD_FOLDER, f),
+        modified: fs.statSync(path.join(UPLOAD_FOLDER, f)).mtime
+      }))
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime())
+
+    return Response.json({ files, folder: UPLOAD_FOLDER })
+  } catch (e) {
+    return Response.json({ error: "폴더 접근 실패", files: [] })
+  }
+}

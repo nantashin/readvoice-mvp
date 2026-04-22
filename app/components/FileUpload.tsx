@@ -319,12 +319,20 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         </p>
       </div>
 
+      {/* 기본 폴더 경로 안내 */}
+      <p style={{ color: "#0D9488", fontSize: "0.85rem", marginBottom: "1rem", textAlign: "center" }}>
+        📁 기본 폴더: {process.env.NEXT_PUBLIC_UPLOAD_FOLDER_HINT}
+      </p>
+
       {/* 파일 업로드 영역 */}
       <div
         role="button"
         tabIndex={0}
         aria-label="파일 업로드 영역. 이미지나 PDF를 드래그하거나 클릭해서 선택하세요."
-        onClick={() => inputRef.current?.click()}
+        onClick={() => {
+          tts.speak("파일 선택 창이 열립니다. 기본 폴더는 ReadVoice 업로드 폴더입니다. 이미지 또는 PDF 파일을 선택해 주세요.")
+          inputRef.current?.click()
+        }}
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
         onKeyDown={handleKeyDown}

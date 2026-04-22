@@ -41,6 +41,13 @@ export default function Home() {
     }
   }, [])
 
+  // 앱 시작 시 업로드 폴더 자동 생성
+  useEffect(() => {
+    fetch("/api/watch-folder").catch(() => {
+      console.log("[폴더 생성] 실패")
+    })
+  }, [])
+
   // 음성 안내 - 브라우저 자동재생 정책 우회
   useEffect(() => {
     const tryPlay = () => {
