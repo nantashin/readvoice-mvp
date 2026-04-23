@@ -11,12 +11,28 @@ interface FileUploadProps {
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
 
+const PDF_MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
+  {
+    id: "glm-ocr",
+    label: "📄 GLM-OCR — 텍스트 추출 최적 (30~60초)",
+    tts: "GLM-OCR 모델입니다. 텍스트 추출에 최적화되어 있으며 약 30초에서 60초 걸립니다.",
+  },
+  {
+    id: "qwen2.5vl:7b",
+    label: "💎 OCR Q — 문서 분석 (2~3분)",
+    tts: "OCR 큐 모델입니다. 문서 분석에 적합하며 약 2분에서 3분 걸립니다.",
+  },
+  {
+    id: "llama3.2-vision:11b-instruct-q4_K_M",
+    label: "🦙 Llama Vision — 정밀 분석 (2~3분)",
+    tts: "라마 비전 모델입니다. 정밀한 분석을 제공하며 약 2분에서 3분 걸립니다.",
+  },
+]
+
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const analysisTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const isFirstAnalysisRef = useRef(true)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
@@ -52,11 +68,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
       // PDF 선택 시 TTS 안내
       if (validation.isPDF) {
-        tts.speak(
-          "PDF 파일이 선택되었습니다. " +
-            "PDF는 OCR 큐 또는 라마 비전 모델만 사용 가능합니다. " +
-            "정확한 인식을 위해 OCR 큐를 권장합니다."
-        )
+        tts.speak("PDF 파일이 선택되었습니다. PDF는 GLM-OCR로 텍스트를 추출합니다.")
       }
 
       // 이미지 파일 선택 시 TTS 안내
@@ -71,7 +83,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     // PDF이고 모델이 명시되지 않았으면, OCR 모드로 자동 설정
     if (validation.isPDF && !model) {
       setUploadedFile(file)
-      setSelectedModel("qwen2.5vl:7b")
+      setSelectedModel("glm-ocr")
       setOcrMode("ocr") // PDF는 자동으로 OCR 모드
       return
     }
@@ -80,8 +92,20 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     onStatusChange("processing")
     setUploadedFile(file)
 
-    // BGM 시작
-    tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
+    // 모델별 예상 시간 정보
+    const modelTimeInfo: Record<string, string> = {
+      moondream: "약 5초에서 15초",
+      "gemma3:4b": "약 10초에서 20초",
+      "qwen2.5vl:7b": "약 20초에서 40초",
+      "llama3.2-vision:11b-instruct-q4_K_M": "약 1분에서 3분",
+      "glm-ocr": "약 30초에서 60초",
+    }
+
+    // 분석 시작 안내 (1회만)
+    const timeInfo = modelTimeInfo[currentModel] || "잠시"
+    tts.speak(`${currentModel} 모델로 분석합니다. ${timeInfo} 걸립니다.`)
+
+    // BGM 시작 (모든 모델에서 재생)
     const audio = new Audio("/sounds/One-step-for-a-better-me.mp3")
     audio.loop = true
     audio.play().catch(() => {
@@ -89,28 +113,8 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     })
     audioRef.current = audio
 
-    // 분석 중 안내 타이머 설정
-    isFirstAnalysisRef.current = true
-    const startAnalysisReminder = () => {
-      if (isFirstAnalysisRef.current) {
-        isFirstAnalysisRef.current = false
-        tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
-        analysisTimerRef.current = setInterval(() => {
-          tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
-        }, 30000)
-      }
-    }
-    const initialTimer = setTimeout(startAnalysisReminder, 5000)
-
     try {
       const result = await analyzeFile(file, currentModel, ocrMode)
-
-      // 타이머 정리
-      clearTimeout(initialTimer)
-      if (analysisTimerRef.current) {
-        clearInterval(analysisTimerRef.current)
-        analysisTimerRef.current = null
-      }
 
       // BGM 정리
       if (audioRef.current) {
@@ -131,13 +135,6 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       onStatusChange("speaking")
       tts.speak(result.text)
     } catch {
-      // 타이머 정리
-      clearTimeout(initialTimer)
-      if (analysisTimerRef.current) {
-        clearInterval(analysisTimerRef.current)
-        analysisTimerRef.current = null
-      }
-
       // BGM 정리
       if (audioRef.current) {
         audioRef.current.pause()
@@ -282,7 +279,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             marginBottom: "0.5rem",
           }}
         >
-          이미지 분석 모델 선택:
+          {previewType === "pdf" ? "PDF 분석 모델 선택:" : "이미지 분석 모델 선택:"}
         </label>
         <select
           id="vision-model"
@@ -290,13 +287,25 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           onChange={(e) => {
             const modelId = e.target.value as VisionModel
             setSelectedModel(modelId)
-            const model = MODELS.find((m) => m.id === modelId)
-            if (model) {
-              tts.speak(`${modelId} 모델로 변경되었습니다. ${model.tts}`)
+
+            if (previewType === "pdf") {
+              const model = PDF_MODELS.find((m) => m.id === modelId)
+              if (model) {
+                tts.speak(`${model.id} 모델로 변경되었습니다. ${model.tts}`)
+              }
+            } else {
+              const model = MODELS.find((m) => m.id === modelId)
+              if (model) {
+                tts.speak(`${model.id} 모델로 변경되었습니다. ${model.tts}`)
+              }
             }
           }}
           disabled={loading}
-          aria-label="이미지 분석에 사용할 모델을 선택하세요"
+          aria-label={
+            previewType === "pdf"
+              ? "PDF 분석에 사용할 모델을 선택하세요"
+              : "이미지 분석에 사용할 모델을 선택하세요"
+          }
           style={{
             width: "100%",
             padding: "0.75rem",
@@ -310,14 +319,22 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          {MODELS.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))}
+          {previewType === "pdf"
+            ? PDF_MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))
+            : MODELS.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label}
+                </option>
+              ))}
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {MODELS.find((m) => m.id === selectedModel)?.tts}
+          {previewType === "pdf"
+            ? PDF_MODELS.find((m) => m.id === selectedModel)?.tts
+            : MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
 

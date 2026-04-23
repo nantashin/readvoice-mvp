@@ -10,6 +10,35 @@ Cover these in order:
 Do NOT add conclusions or summaries at the end.
 Pure description only.`
 
+const LLAMA_VISION_PROMPT = `You are analyzing an image for description.
+Describe in this exact order:
+
+1. MAIN SUBJECT: Most prominent person/character
+   - Exact clothing colors, patterns, style
+   - Accessories worn or carried
+   - Posture: standing/sitting/walking, body angle
+   - What they are holding in each hand, exactly
+   - Facial expression and direction of gaze
+
+2. SECONDARY SUBJECTS: Other people or animals
+   - Same level of detail
+
+3. OBJECTS: Items in the scene with exact positions
+
+4. BACKGROUND: Sky, buildings, nature, time of day
+   - Specific colors and lighting
+
+5. COLORS: Overall color palette
+
+6. ATMOSPHERE: Mood and feeling
+
+Rules:
+- Be extremely specific about what each hand holds
+- Describe exact posture and body position
+- Never use vague terms
+- Do NOT add interpretations
+- No summary at the end`
+
 function removeEnglishWords(text: string): string {
   return text
     .replace(/\bsilhouette\b/gi, "실루엣")
@@ -152,7 +181,7 @@ export async function extractTextFromImage(
   const timeouts: Record<string, number> = {
     moondream: 30000,
     "gemma3:4b": 60000,
-    "qwen2.5vl:7b": 180000,
+    "qwen2.5vl:7b": 300000,
     "llama3.2-vision:11b-instruct-q4_K_M": 300000,
   }
 
@@ -170,6 +199,12 @@ export async function extractTextFromImage(
       console.log(`[Vision] 시도: ${model}`)
       const timeout = timeouts[model] || 60000
 
+      // llama3.2-vision은 상세 프롬프트 사용
+      const prompt =
+        model === "llama3.2-vision:11b-instruct-q4_K_M"
+          ? LLAMA_VISION_PROMPT
+          : VISION_PROMPT
+
       const res = await fetch("http://localhost:11434/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -179,7 +214,7 @@ export async function extractTextFromImage(
           messages: [
             {
               role: "user",
-              content: VISION_PROMPT,
+              content: prompt,
               images: [base64],
             },
           ],
