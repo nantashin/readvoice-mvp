@@ -2,11 +2,7 @@ import fs from "fs"
 import path from "path"
 import os from "os"
 import { execSync, spawnSync } from "child_process"
-
-const PDF_VISION_PROMPT = `Read ALL text in this document image exactly as written.
-Output the complete text content from top to bottom.
-Do not describe the image. Only output the text you see.
-Preserve the original formatting and structure.`
+import { extractTextOCR } from "./ocr-engine"
 
 function extractRawText(buffer: Buffer): string {
   const str = buffer.toString("binary")
@@ -115,47 +111,22 @@ export async function extractTextFromPDF(
         )
         const base64Image = parsed.base64
 
-        // PDF 전용 Vision 모델 순서
-        for (const model of [
-          "qwen2.5vl:7b",
-          "llama3.2-vision:11b-instruct-q4_K_M",
-        ]) {
-          try {
-            console.log(`[PDF] ${model} Vision 시도...`)
-            const res = await fetch("http://localhost:11434/api/chat", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                model,
-                messages: [
-                  {
-                    role: "user",
-                    content: PDF_VISION_PROMPT,
-                    images: [base64Image],
-                  },
-                ],
-                stream: false,
-              }),
-              signal: AbortSignal.timeout(180000),
-            })
+        // OCR 엔진으로 텍스트 추출
+        try {
+          const imageBuffer = Buffer.from(base64Image, "base64")
+          const ocrText = await extractTextOCR(imageBuffer, "image/png", name)
 
-            if (!res.ok) continue
+          const prefix =
+            parsed.total_pages > 1
+              ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
+              : ""
 
-            const data = await res.json()
-            const text = data.message?.content?.trim()
-
-            if (text && text.length > 30) {
-              console.log(`[PDF] ${model} Vision 성공`)
-              const prefix =
-                parsed.total_pages > 1
-                  ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
-                  : ""
-              return `파일명: ${name}\n\n설명:\n${prefix}${text}`
-            }
-          } catch (e: unknown) {
-            const message = e instanceof Error ? e.message : String(e)
-            console.log(`[PDF] ${model} 실패:`, message)
-          }
+          // extractTextOCR이 이미 "파일명: ..." 형식으로 반환하므로, prefix만 추가
+          return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : String(e)
+          console.log("[PDF] OCR 엔진 실패:", message)
+          throw e
         }
       }
     } catch (e: unknown) {

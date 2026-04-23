@@ -11,11 +11,15 @@ export interface AnalysisResult {
 
 export async function analyzeFile(
   file: File,
-  model: VisionModel
+  model: VisionModel,
+  mode?: "ocr" | "describe"
 ): Promise<AnalysisResult> {
   const formData = new FormData()
   formData.append("file", file)
   formData.append("model", model)
+  if (mode) {
+    formData.append("mode", mode)
+  }
 
   try {
     const res = await fetch("/api/ocr", { method: "POST", body: formData })

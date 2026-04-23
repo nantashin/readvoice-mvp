@@ -27,6 +27,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [ocrMode, setOcrMode] = useState<"ocr" | "describe">("describe")
   const tts = useSpeechSynthesis()
 
   const handleFile = async (file: File, model?: VisionModel) => {
@@ -60,23 +61,18 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
       // 이미지 파일 선택 시 TTS 안내
       if (validation.isImage) {
-        if (currentModel === "qwen2.5vl:7b") {
-          tts.speak(
-            "OCR 큐 모델로 분석합니다.\n첫 실행 시 최대 3분까지 걸릴 수 있습니다.\n음악을 들으며 기다려 주세요."
-          )
-        } else {
-          const modelInfo = MODELS.find((m) => m.id === currentModel)
-          if (modelInfo) {
-            tts.speak(`${file.name} 파일이 선택되었습니다. ${modelInfo.tts}`)
-          }
-        }
+        tts.speak(
+          "이미지에서 텍스트를 읽을지, 이미지를 설명할지 선택하세요. " +
+            "일번. 텍스트 읽기. 이번. 이미지 설명."
+        )
       }
     }
 
-    // PDF이고 모델이 명시되지 않았으면, 모델만 변경 후 리턴
+    // PDF이고 모델이 명시되지 않았으면, OCR 모드로 자동 설정
     if (validation.isPDF && !model) {
       setUploadedFile(file)
       setSelectedModel("qwen2.5vl:7b")
+      setOcrMode("ocr") // PDF는 자동으로 OCR 모드
       return
     }
 
@@ -107,7 +103,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     const initialTimer = setTimeout(startAnalysisReminder, 5000)
 
     try {
-      const result = await analyzeFile(file, currentModel)
+      const result = await analyzeFile(file, currentModel, ocrMode)
 
       // 타이머 정리
       clearTimeout(initialTimer)
@@ -265,6 +261,13 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     }
   }, [selectedModel])
 
+  // 모드 변경 시 자동 재분석
+  useEffect(() => {
+    if (uploadedFile && !loading && previewType === "image") {
+      handleFile(uploadedFile, selectedModel)
+    }
+  }, [ocrMode])
+
   return (
     <div style={{ width: "100%", maxWidth: "600px" }}>
       {/* 모델 선택 드롭다운 */}
@@ -317,6 +320,89 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           {MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
+
+      {/* 이미지 모드 토글 (이미지 파일일 때만 표시) */}
+      {previewType === "image" && (
+        <div style={{ marginBottom: "1rem" }}>
+          <p
+            style={{
+              color: "#0D9488",
+              fontWeight: 700,
+              fontSize: "0.9rem",
+              marginBottom: "0.5rem",
+              textAlign: "center",
+            }}
+          >
+            처리 모드:
+          </p>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              onClick={() => {
+                setOcrMode("ocr")
+                tts.speak("텍스트 읽기 모드로 변경되었습니다.")
+              }}
+              disabled={loading}
+              aria-label="텍스트 읽기 모드"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: ocrMode === "ocr" ? "2px solid #0284C7" : "2px solid #E5E7EB",
+                background: ocrMode === "ocr" ? "#0284C7" : "white",
+                color: ocrMode === "ocr" ? "white" : "#1E3A5F",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+                transition: "all 0.2s",
+              }}
+            >
+              📖 텍스트 읽기
+            </button>
+            <button
+              onClick={() => {
+                setOcrMode("describe")
+                tts.speak("이미지 설명 모드로 변경되었습니다.")
+              }}
+              disabled={loading}
+              aria-label="이미지 설명 모드"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: ocrMode === "describe" ? "2px solid #0284C7" : "2px solid #E5E7EB",
+                background: ocrMode === "describe" ? "#0284C7" : "white",
+                color: ocrMode === "describe" ? "white" : "#1E3A5F",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+                transition: "all 0.2s",
+              }}
+            >
+              🖼️ 이미지 설명
+            </button>
+          </div>
+          <p
+            style={{
+              color: "#64748B",
+              fontSize: "0.75rem",
+              marginTop: "0.5rem",
+              textAlign: "center",
+            }}
+          >
+            {ocrMode === "ocr"
+              ? "문서나 이미지의 텍스트를 그대로 추출합니다"
+              : "이미지의 내용을 상세히 설명합니다"}
+          </p>
+        </div>
+      )}
 
       {/* 기본 폴더 경로 안내 */}
       <p style={{ color: "#0D9488", fontSize: "0.85rem", marginBottom: "1rem", textAlign: "center" }}>
