@@ -53,8 +53,9 @@ export async function extractTextFromPDF(
     console.log(
       `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
     )
-  } catch (e: any) {
-    console.error("[PDF] 텍스트 파싱 실패:", e.message)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error("[PDF] 텍스트 파싱 실패:", message)
   }
 
   // 2단계: pypdfium2 Python 스크립트로 PDF → PNG 변환
@@ -151,13 +152,15 @@ export async function extractTextFromPDF(
                   : ""
               return `파일명: ${name}\n\n설명:\n${prefix}${text}`
             }
-          } catch (e: any) {
-            console.log(`[PDF] ${model} 실패:`, e.message)
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e)
+            console.log(`[PDF] ${model} 실패:`, message)
           }
         }
       }
-    } catch (e: any) {
-      console.error("[PDF] pypdfium2 실패:", e.message)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error("[PDF] pypdfium2 실패:", message)
       if (fs.existsSync(tmpPdf)) {
         try {
           fs.unlinkSync(tmpPdf)
@@ -165,8 +168,9 @@ export async function extractTextFromPDF(
       }
       throw e
     }
-  } catch (e: any) {
-    console.error("[PDF] PDF 변환 실패:", e.message)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error("[PDF] PDF 변환 실패:", message)
   }
 
   // 3단계: 모든 처리 실패

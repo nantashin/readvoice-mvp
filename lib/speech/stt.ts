@@ -13,7 +13,7 @@ export function useSpeechRecognition() {
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    const SR = window.SpeechRecognition || (window as any).webkitSpeechRecognition
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) { setState(s => ({ ...s, error: "이 브라우저는 음성 인식을 지원하지 않습니다." })); return }
     const r = new SR()
     r.lang = "ko-KR"

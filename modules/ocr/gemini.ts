@@ -203,8 +203,9 @@ export async function extractTextFromImage(
       console.log(`[Vision] ${model} 성공, 번역 시작`)
       const korean = await translateToKorean(englishResult, name)
       return korean
-    } catch (e: any) {
-      console.error(`[Vision] 실패 ${model}:`, e.message)
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e)
+      console.error(`[Vision] 실패 ${model}:`, message)
     }
   }
 

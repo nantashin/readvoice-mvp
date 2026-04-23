@@ -1,40 +1,15 @@
 "use client"
 import { useRef, useState, useEffect } from "react"
 import { useSpeechSynthesis } from "@/lib/speech/tts"
-
-const ACCEPT = "image/jpeg,image/png,image/webp,application/pdf"
+import { validateFile, ACCEPT } from "@/lib/file/validator"
+import { compressImage } from "@/lib/file/compressor"
+import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
+import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
 
 interface FileUploadProps {
   onResult: (text: string) => void
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
-
-type VisionModel = "moondream" | "gemma3:4b" | "qwen2.5vl:7b" | "llama3.2-vision:11b-instruct-q4_K_M"
-
-const MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
-  {
-    id: "moondream",
-    label: "🌙 Moondream — 간단한 사진 (5~15초)",
-    tts: "문드림 모델입니다. 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다."
-  },
-  {
-    id: "gemma3:4b",
-    label: "🔮 Gemma3 — 빠르고 정확 (10~20초)",
-    tts: "구글 젬마3 모델입니다. 빠르고 정확한 이미지 분석을 제공하며 약 10초에서 20초 걸립니다."
-  },
-  {
-    id: "qwen2.5vl:7b",
-    label: "💎 OCR Q — 문서/텍스트 인식 최적 (20~40초)",
-    tts: "OCR 큐 모델입니다. 문서와 텍스트 인식에 최적화되어 있으며 약 20초에서 40초 걸립니다."
-  },
-  {
-    id: "llama3.2-vision:11b-instruct-q4_K_M",
-    label: "🦙 Llama Vision — 상세 묘사 (1~3분)",
-    tts: "라마 비전 모델입니다. 배경과 분위기까지 가장 상세하게 묘사하며 약 1분에서 3분 걸립니다."
-  }
-  // 향후 Gemini API와 함께 클라우드 모델 탭으로 분리 예정
-  // { id: "claude", label: "☁️ Claude API" }
-]
 
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -48,106 +23,34 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [loading, setLoading] = useState(false)
   const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
   const [previewUrl, setPreviewUrl] = useState<string>("")
-  const [previewType, setPreviewType] = useState<"image" | "pdf" | "">("")
+  const [previewType, setPreviewType] = useState<PreviewType>("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
-  const [uploadedBuffer, setUploadedBuffer] = useState<Buffer | null>(null)
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const tts = useSpeechSynthesis()
-
-  const processImage = async (file: File): Promise<string> => {
-    const MAX_SIZE = 800 * 1024 // 800KB
-
-    // 800KB 이하: 원본 그대로
-    if (file.size <= MAX_SIZE) {
-      return new Promise((resolve) => {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          resolve((e.target?.result as string).split(",")[1])
-        }
-        reader.readAsDataURL(file)
-      })
-    }
-
-    // 800KB 초과: 비율 유지하면서 압축
-    return new Promise((resolve) => {
-      const img = new Image()
-      const url = URL.createObjectURL(file)
-      img.onload = () => {
-        // 원본 비율 그대로 유지
-        const originalWidth = img.naturalWidth
-        const originalHeight = img.naturalHeight
-        const ratio = originalWidth / originalHeight
-
-        // 긴 쪽을 1920px로 제한 (비율 유지)
-        let width = originalWidth
-        let height = originalHeight
-        const MAX_PX = 1920
-
-        if (width > height && width > MAX_PX) {
-          // 가로가 긴 이미지 (16:9, 4:3 등)
-          width = MAX_PX
-          height = Math.round(MAX_PX / ratio)
-        } else if (height > width && height > MAX_PX) {
-          // 세로가 긴 이미지 (9:16, 타로카드 등)
-          height = MAX_PX
-          width = Math.round(MAX_PX * ratio)
-        } else if (width === height && width > MAX_PX) {
-          // 정사각형
-          width = MAX_PX
-          height = MAX_PX
-        }
-        // MAX_PX 이하면 픽셀 크기 그대로 유지
-
-        const canvas = document.createElement("canvas")
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext("2d")!
-        ctx.drawImage(img, 0, 0, width, height)
-
-        // 품질 0.85로 압축
-        let quality = 0.85
-        let result = canvas.toDataURL("image/jpeg", quality)
-
-        // 여전히 크면 품질 더 낮춤
-        while (result.length * 0.75 > MAX_SIZE && quality > 0.5) {
-          quality -= 0.1
-          result = canvas.toDataURL("image/jpeg", quality)
-        }
-
-        URL.revokeObjectURL(url)
-        console.log(
-          `[이미지] 원본: ${(file.size / 1024).toFixed(0)}KB`,
-          `→ 압축: ${(result.length * 0.75 / 1024).toFixed(0)}KB`,
-          `비율: ${originalWidth}x${originalHeight} → ${width}x${height}`
-        )
-        resolve(result.split(",")[1])
-      }
-      img.src = url
-    })
-  }
 
   const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
     setFileName(file.name)
 
-    // PDF 파일 감지
-    const isPDF =
-      file.type === "application/pdf" ||
-      file.name.toLowerCase().endsWith(".pdf")
+    // 파일 검증
+    const validation = validateFile(file)
+    if (!validation.isValid) {
+      setError(validation.errorMessage ?? "파일 처리 실패")
+      tts.speak(validation.errorMessage ?? "파일 처리 실패")
+      return
+    }
 
     let currentModel = model || selectedModel
 
     // 파일 선택 시에만 미리보기 설정 (model 파라미터가 없을 때)
     if (!model) {
-      if (file.type.startsWith("image/")) {
-        setPreviewUrl(URL.createObjectURL(file))
-        setPreviewType("image")
-      } else if (isPDF) {
-        setPreviewUrl("")
-        setPreviewType("pdf")
+      const preview = createPreview(file, validation.isPDF, validation.isImage)
+      setPreviewUrl(preview.url)
+      setPreviewType(preview.type)
 
-        // PDF 선택 시 TTS 안내
+      // PDF 선택 시 TTS 안내
+      if (validation.isPDF) {
         tts.speak(
           "PDF 파일이 선택되었습니다. " +
             "PDF는 OCR 큐 또는 라마 비전 모델만 사용 가능합니다. " +
@@ -156,7 +59,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       }
 
       // 이미지 파일 선택 시 TTS 안내
-      if (file.type.startsWith("image/")) {
+      if (validation.isImage) {
         if (currentModel === "qwen2.5vl:7b") {
           tts.speak(
             "OCR 큐 모델로 분석합니다.\n첫 실행 시 최대 3분까지 걸릴 수 있습니다.\n음악을 들으며 기다려 주세요."
@@ -171,31 +74,15 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     }
 
     // PDF이고 모델이 명시되지 않았으면, 모델만 변경 후 리턴
-    if (isPDF && !model) {
+    if (validation.isPDF && !model) {
       setUploadedFile(file)
-      const arrayBuffer = await file.arrayBuffer()
-      setUploadedBuffer(Buffer.from(arrayBuffer))
-      // useEffect가 selectedModel 변경을 감지하여 자동으로 재처리
       setSelectedModel("qwen2.5vl:7b")
       return
     }
 
     setLoading(true)
     onStatusChange("processing")
-
-    // 파일 저장
     setUploadedFile(file)
-    let uploadBuffer: Buffer
-    if (file.type.startsWith("image/")) {
-      // 이미지: processImage를 거쳐서 압축
-      const base64String = await processImage(file)
-      uploadBuffer = Buffer.from(base64String, "base64")
-    } else {
-      // PDF: 원본 그대로
-      const arrayBuffer = await file.arrayBuffer()
-      uploadBuffer = Buffer.from(arrayBuffer)
-    }
-    setUploadedBuffer(uploadBuffer)
 
     // BGM 시작
     tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
@@ -212,7 +99,6 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       if (isFirstAnalysisRef.current) {
         isFirstAnalysisRef.current = false
         tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
-        // 30초마다 반복
         analysisTimerRef.current = setInterval(() => {
           tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
         }, 30000)
@@ -220,13 +106,8 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     }
     const initialTimer = setTimeout(startAnalysisReminder, 5000)
 
-    const formData = new FormData()
-    formData.append("file", file)
-    formData.append("model", currentModel)
-
     try {
-      const res = await fetch("/api/ocr", { method: "POST", body: formData })
-      const data = await res.json()
+      const result = await analyzeFile(file, currentModel)
 
       // 타이머 정리
       clearTimeout(initialTimer)
@@ -241,20 +122,18 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         audioRef.current = null
       }
 
-      if (!res.ok) {
-        const msg = data.error ?? "파일 처리 중 오류가 발생했습니다."
-        setError(msg)
-        tts.speak(msg)
+      if (result.error) {
+        setError(result.error)
+        tts.speak(result.error)
         onStatusChange("speaking")
         return
       }
 
       // 분석 완료 안내
       tts.speak("분석이 완료되었습니다. 읽어드리겠습니다.")
-
-      onResult(data.text)
+      onResult(result.text)
       onStatusChange("speaking")
-      tts.speak(data.text)
+      tts.speak(result.text)
     } catch {
       // 타이머 정리
       clearTimeout(initialTimer)
@@ -275,7 +154,6 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       onStatusChange("speaking")
     } finally {
       setLoading(false)
-      // 파일 재업로드를 위해 input value 초기화
       if (inputRef.current) {
         inputRef.current.value = ""
       }
@@ -305,7 +183,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     try {
       tts.speak("카메라 촬영 모드입니다. 문서나 사진을 화면 하단 오른쪽 촬영 영역에 놓아주세요. 자동으로 인식합니다.")
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
+        video: { facingMode: "environment" },
       })
       setCameraStream(stream)
       if (videoRef.current) {
@@ -336,7 +214,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
         // 카메라 종료
         if (cameraStream) {
-          cameraStream.getTracks().forEach(track => track.stop())
+          cameraStream.getTracks().forEach((track) => track.stop())
           setCameraStream(null)
         }
         setCameraMode(false)
@@ -350,10 +228,9 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     }
   }
 
-  // 카메라 모드 종료
   const closeCamera = () => {
     if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop())
+      cameraStream.getTracks().forEach((track) => track.stop())
       setCameraStream(null)
     }
     setCameraMode(false)
@@ -363,13 +240,16 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   useEffect(() => {
     return () => {
       if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop())
+        cameraStream.getTracks().forEach((track) => track.stop())
       }
       if (audioRef.current) {
         audioRef.current.pause()
       }
+      if (previewUrl) {
+        cleanupPreview(previewUrl)
+      }
     }
-  }, [cameraStream])
+  }, [cameraStream, previewUrl])
 
   // 카메라 모드 5초 후 자동 촬영
   useEffect(() => {
@@ -407,7 +287,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           onChange={(e) => {
             const modelId = e.target.value as VisionModel
             setSelectedModel(modelId)
-            const model = MODELS.find(m => m.id === modelId)
+            const model = MODELS.find((m) => m.id === modelId)
             if (model) {
               tts.speak(`${modelId} 모델로 변경되었습니다. ${model.tts}`)
             }
@@ -427,12 +307,14 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          {MODELS.map(model => (
-            <option key={model.id} value={model.id}>{model.label}</option>
+          {MODELS.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label}
+            </option>
           ))}
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {MODELS.find(m => m.id === selectedModel)?.tts}
+          {MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
 
@@ -561,13 +443,15 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
       {/* 카메라 모드 */}
       {cameraMode && (
-        <div style={{
-          marginTop: "1rem",
-          padding: "1rem",
-          background: "#f0f0f0",
-          borderRadius: "1rem",
-          textAlign: "center",
-        }}>
+        <div
+          style={{
+            marginTop: "1rem",
+            padding: "1rem",
+            background: "#f0f0f0",
+            borderRadius: "1rem",
+            textAlign: "center",
+          }}
+        >
           <video
             ref={videoRef}
             autoPlay

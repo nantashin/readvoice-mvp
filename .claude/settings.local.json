@@ -14,7 +14,9 @@
       "Bash(grep -E '\\\\.\\(md|py\\)$')",
       "Bash(npm uninstall:*)",
       "Bash(taskkill:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)"
     ]
   }
 }

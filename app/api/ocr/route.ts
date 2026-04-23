@@ -25,9 +25,15 @@ export async function POST(req: NextRequest) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const model = (formData.get("model") as string) || "moondream"
+    const modelStr = (formData.get("model") as string) || "moondream"
 
-    const text = await extractText(buffer, file.type, file.name, model as any)
+    // 모델 검증
+    const validModels = ["moondream", "gemma3:4b", "qwen2.5vl:7b", "llama3.2-vision:11b-instruct-q4_K_M"]
+    if (!validModels.includes(modelStr)) {
+      return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+    }
+
+    const text = await extractText(buffer, file.type, file.name, modelStr as "moondream" | "llama-vision-q4" | "claude-haiku")
 
     return NextResponse.json({ text })
   } catch (err) {
