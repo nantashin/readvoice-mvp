@@ -61,6 +61,14 @@ function removeEnglishWords(text: string): string {
     .replace(/\bfloating\b/gi, "떠있는")
     .replace(/\bglowing\b/gi, "빛나는")
     .replace(/\bshimmering\b/gi, "반짝이는")
+    .replace(/\blap\b/gi, "무릎")
+    .replace(/\bshiba\b/gi, "시바")
+    .replace(/\bline\b/gi, "")
+    .replace(/대남자/g, "남성")
+    .replace(/시바라인/g, "시바견")
+    .replace(/\bsitting\b/gi, "앉아있는")
+    .replace(/\bstanding\b/gi, "서있는")
+    .replace(/\bholding\b/gi, "들고있는")
     .replace(/[A-Za-z]{4,}\b/g, (match) => {
       console.log("[후처리] 영어 단어 발견:", match)
       return match
@@ -91,6 +99,11 @@ async function translateToKorean(
 - 체크리스트 출력 금지
 - "빈 줄 없음", "줄바꿈 사용" 같은 메타 텍스트 금지
 - 번역 내용만 출력
+
+중요:
+전문용어나 영어 단어를 절대 그대로 쓰지 말고
+자연스러운 한국어로 번역해.
+예: lap → 무릎, shiba → 시바견
 
 번역:
 ${englishText}`,
