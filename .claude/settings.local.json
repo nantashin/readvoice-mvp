@@ -13,7 +13,8 @@
       "Bash(node:*)",
       "Bash(grep -E '\\\\.\\(md|py\\)$')",
       "Bash(npm uninstall:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(pip install:*)"
     ]
   }
 }

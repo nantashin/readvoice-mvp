@@ -9,18 +9,13 @@ interface FileUploadProps {
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
 
-type VisionModel = "moondream" | "qwen2.5vl:7b" | "gemma3:4b" | "llama3.2-vision:11b-instruct-q4_K_M" | "claude"
+type VisionModel = "moondream" | "gemma3:4b" | "qwen2.5vl:7b" | "llama3.2-vision:11b-instruct-q4_K_M"
 
 const MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
   {
     id: "moondream",
     label: "🌙 Moondream — 간단한 사진 (5~15초)",
-    tts: "문드림 모델입니다. 달의 꿈이라는 뜻으로 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다."
-  },
-  {
-    id: "qwen2.5vl:7b",
-    label: "💎 Qwen2.5-VL — OCR+한국어 최강 (20~40초)",
-    tts: "큰 2.5 비엘 모델입니다. 텍스트와 한국어 인식이 가장 뛰어나며 약 20초에서 40초 걸립니다."
+    tts: "문드림 모델입니다. 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다."
   },
   {
     id: "gemma3:4b",
@@ -28,15 +23,17 @@ const MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
     tts: "구글 젬마3 모델입니다. 빠르고 정확한 이미지 분석을 제공하며 약 10초에서 20초 걸립니다."
   },
   {
+    id: "qwen2.5vl:7b",
+    label: "💎 OCR Q — 문서/텍스트 인식 최적 (20~40초)",
+    tts: "OCR 큐 모델입니다. 문서와 텍스트 인식에 최적화되어 있으며 약 20초에서 40초 걸립니다."
+  },
+  {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
     label: "🦙 Llama Vision — 상세 묘사 (1~3분)",
     tts: "라마 비전 모델입니다. 배경과 분위기까지 가장 상세하게 묘사하며 약 1분에서 3분 걸립니다."
-  },
-  {
-    id: "claude",
-    label: "☁️ Claude API — 클라우드 (3~10초)",
-    tts: "클로드 클라우드 모델입니다. 인터넷 연결이 필요하며 약 3초에서 10초 걸립니다."
   }
+  // 향후 Gemini API와 함께 클라우드 모델 탭으로 분리 예정
+  // { id: "claude", label: "☁️ Claude API" }
 ]
 
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
@@ -49,7 +46,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<VisionModel>("qwen2.5vl:7b")
+  const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [previewType, setPreviewType] = useState<"image" | "pdf" | "">("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -58,26 +55,129 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const tts = useSpeechSynthesis()
 
+  const processImage = async (file: File): Promise<string> => {
+    const MAX_SIZE = 800 * 1024 // 800KB
+
+    // 800KB 이하: 원본 그대로
+    if (file.size <= MAX_SIZE) {
+      return new Promise((resolve) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          resolve((e.target?.result as string).split(",")[1])
+        }
+        reader.readAsDataURL(file)
+      })
+    }
+
+    // 800KB 초과: 비율 유지하면서 압축
+    return new Promise((resolve) => {
+      const img = new Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        // 원본 비율 그대로 유지
+        const originalWidth = img.naturalWidth
+        const originalHeight = img.naturalHeight
+        const ratio = originalWidth / originalHeight
+
+        // 긴 쪽을 1920px로 제한 (비율 유지)
+        let width = originalWidth
+        let height = originalHeight
+        const MAX_PX = 1920
+
+        if (width > height && width > MAX_PX) {
+          // 가로가 긴 이미지 (16:9, 4:3 등)
+          width = MAX_PX
+          height = Math.round(MAX_PX / ratio)
+        } else if (height > width && height > MAX_PX) {
+          // 세로가 긴 이미지 (9:16, 타로카드 등)
+          height = MAX_PX
+          width = Math.round(MAX_PX * ratio)
+        } else if (width === height && width > MAX_PX) {
+          // 정사각형
+          width = MAX_PX
+          height = MAX_PX
+        }
+        // MAX_PX 이하면 픽셀 크기 그대로 유지
+
+        const canvas = document.createElement("canvas")
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext("2d")!
+        ctx.drawImage(img, 0, 0, width, height)
+
+        // 품질 0.85로 압축
+        let quality = 0.85
+        let result = canvas.toDataURL("image/jpeg", quality)
+
+        // 여전히 크면 품질 더 낮춤
+        while (result.length * 0.75 > MAX_SIZE && quality > 0.5) {
+          quality -= 0.1
+          result = canvas.toDataURL("image/jpeg", quality)
+        }
+
+        URL.revokeObjectURL(url)
+        console.log(
+          `[이미지] 원본: ${(file.size / 1024).toFixed(0)}KB`,
+          `→ 압축: ${(result.length * 0.75 / 1024).toFixed(0)}KB`,
+          `비율: ${originalWidth}x${originalHeight} → ${width}x${height}`
+        )
+        resolve(result.split(",")[1])
+      }
+      img.src = url
+    })
+  }
+
   const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
     setFileName(file.name)
-    const currentModel = model || selectedModel
+
+    // PDF 파일 감지
+    const isPDF =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf")
+
+    let currentModel = model || selectedModel
 
     // 파일 선택 시에만 미리보기 설정 (model 파라미터가 없을 때)
     if (!model) {
       if (file.type.startsWith("image/")) {
         setPreviewUrl(URL.createObjectURL(file))
         setPreviewType("image")
-      } else if (file.type === "application/pdf") {
+      } else if (isPDF) {
         setPreviewUrl("")
         setPreviewType("pdf")
+
+        // PDF 선택 시 TTS 안내
+        tts.speak(
+          "PDF 파일이 선택되었습니다. " +
+            "PDF는 OCR 큐 또는 라마 비전 모델만 사용 가능합니다. " +
+            "정확한 인식을 위해 OCR 큐를 권장합니다."
+        )
       }
 
-      // 파일 선택 시 TTS 안내
-      const model = MODELS.find(m => m.id === currentModel)
-      if (model) {
-        tts.speak(`${file.name} 파일이 선택되었습니다. ${model.tts}`)
+      // 이미지 파일 선택 시 TTS 안내
+      if (file.type.startsWith("image/")) {
+        if (currentModel === "qwen2.5vl:7b") {
+          tts.speak(
+            "OCR 큐 모델로 분석합니다.\n첫 실행 시 최대 3분까지 걸릴 수 있습니다.\n음악을 들으며 기다려 주세요."
+          )
+        } else {
+          const modelInfo = MODELS.find((m) => m.id === currentModel)
+          if (modelInfo) {
+            tts.speak(`${file.name} 파일이 선택되었습니다. ${modelInfo.tts}`)
+          }
+        }
       }
+    }
+
+    // PDF이고 모델이 명시되지 않았으면, 모델만 변경 후 리턴
+    if (isPDF && !model) {
+      setUploadedFile(file)
+      const arrayBuffer = await file.arrayBuffer()
+      setUploadedBuffer(Buffer.from(arrayBuffer))
+      // useEffect가 selectedModel 변경을 감지하여 자동으로 재처리
+      setSelectedModel("qwen2.5vl:7b")
+      return
     }
 
     setLoading(true)
@@ -85,8 +185,17 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
     // 파일 저장
     setUploadedFile(file)
-    const buffer = await file.arrayBuffer()
-    setUploadedBuffer(Buffer.from(buffer))
+    let uploadBuffer: Buffer
+    if (file.type.startsWith("image/")) {
+      // 이미지: processImage를 거쳐서 압축
+      const base64String = await processImage(file)
+      uploadBuffer = Buffer.from(base64String, "base64")
+    } else {
+      // PDF: 원본 그대로
+      const arrayBuffer = await file.arrayBuffer()
+      uploadBuffer = Buffer.from(arrayBuffer)
+    }
+    setUploadedBuffer(uploadBuffer)
 
     // BGM 시작
     tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
@@ -331,6 +440,20 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       <p style={{ color: "#0D9488", fontSize: "0.85rem", marginBottom: "1rem", textAlign: "center" }}>
         📁 ReadVoice_Upload
       </p>
+
+      {/* PDF 지원 모델 안내 */}
+      {previewType === "pdf" && (
+        <p
+          style={{
+            color: "#0284C7",
+            fontSize: "0.85rem",
+            marginBottom: "1rem",
+            textAlign: "center",
+          }}
+        >
+          📄 PDF는 OCR Q / Llama Vision 모델만 지원됩니다
+        </p>
+      )}
 
       {/* 파일 업로드 영역 */}
       <div

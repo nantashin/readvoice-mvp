@@ -1,0 +1,86 @@
+개발_지침서_v3.md를 읽고 아래를 진행해줘.
+
+1. app/components/FileUpload.tsx 모델 목록 업데이트:
+
+5개 모델로 교체 (llava 제거):
+const MODELS = [
+  { 
+    id: "moondream", 
+    label: "🌙 Moondream — 간단한 사진 (5~15초)",
+    tts: "문드림 모델입니다. 달의 꿈이라는 뜻으로 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다."
+  },
+  { 
+    id: "qwen2.5vl:7b", 
+    label: "💎 Qwen2.5-VL — OCR+한국어 최강 (20~40초)",
+    tts: "큰 2.5 비엘 모델입니다. 텍스트와 한국어 인식이 가장 뛰어나며 약 20초에서 40초 걸립니다."
+  },
+  { 
+    id: "gemma3:4b", 
+    label: "🔮 Gemma3 — 빠르고 정확 (10~20초)",
+    tts: "구글 젬마3 모델입니다. 빠르고 정확한 이미지 분석을 제공하며 약 10초에서 20초 걸립니다."
+  },
+  { 
+    id: "llama3.2-vision:11b-instruct-q4_K_M", 
+    label: "🦙 Llama Vision — 상세 묘사 (1~3분)",
+    tts: "라마 비전 모델입니다. 배경과 분위기까지 가장 상세하게 묘사하며 약 1분에서 3분 걸립니다."
+  },
+  { 
+    id: "claude", 
+    label: "☁️ Claude API — 클라우드 (3~10초)",
+    tts: "클로드 클라우드 모델입니다. 인터넷 연결이 필요하며 약 3초에서 10초 걸립니다."
+  }
+]
+
+기본값: qwen2.5vl:7b
+
+2. modules/ocr/gemini.ts Vision 프롬프트 모델별 최적화:
+
+moondream 프롬프트:
+"Describe this image in detail for a blind person.
+List ALL text visible first, then describe the scene,
+people, colors, objects, and background."
+
+qwen2.5vl 프롬프트 (OCR 특화):
+"You are an expert OCR and image description system.
+STEP 1 - READ ALL TEXT: Extract every single character,
+word, number, symbol visible in this image exactly as written.
+List from top-left to bottom-right.
+STEP 2 - DESCRIBE SCENE: Full visual description including
+people, clothing, colors, background, atmosphere.
+Be extremely detailed. Output in English."
+
+gemma3 프롬프트:
+"Analyze this image completely for a visually impaired person.
+First: transcribe ALL visible text exactly.
+Then: describe people, objects, colors, background, and mood
+in vivid detail so the person can visualize it clearly."
+
+llama3.2-vision 프롬프트: 기존 유지 (이미 좋음)
+
+Claude API 프롬프트 (한국어 직접):
+"당신은 시각장애인을 위한 이미지 설명 전문가입니다.
+파일명: [fileName]
+
+다음 순서로 빠짐없이 설명해주세요:
+1. 이미지 속 모든 텍스트 (위에서 아래로 정확히)
+2. 인물/캐릭터 (의상, 색상, 표정, 자세)
+3. 사물과 소품
+4. 배경 (하늘, 건물, 자연, 조명)
+5. 색상과 분위기
+
+배경 묘사 절대 생략 금지."
+
+3. 번역 품질 개선:
+translateToKorean 함수에서
+번역 완료 후 영어 단어가 5개 이상이면
+Claude API로 재번역:
+
+function hasEnglish(text: string): boolean {
+  const englishWords = text.match(/\b[a-zA-Z]{3,}\b/g) || []
+  return englishWords.length > 5
+}
+
+번역 후 hasEnglish 체크 → true면 Claude 재번역
+
+완료 후 npm run build 후
+git add . && git commit -m "feat: Qwen2.5-VL/Gemma3 추가, Vision 프롬프트 최적화"
