@@ -3,7 +3,6 @@ export type VisionModel =
   | "gemma3:4b"
   | "qwen2.5vl:7b"
   | "llama3.2-vision:11b-instruct-q4_K_M"
-  | "glm-ocr"
 
 export interface AnalysisResult {
   text: string
@@ -12,11 +11,15 @@ export interface AnalysisResult {
 
 export async function analyzeFile(
   file: File,
-  model: VisionModel
+  model: VisionModel,
+  mode?: "ocr" | "describe"
 ): Promise<AnalysisResult> {
   const formData = new FormData()
   formData.append("file", file)
   formData.append("model", model)
+  if (mode) {
+    formData.append("mode", mode)
+  }
 
   try {
     const res = await fetch("/api/ocr", { method: "POST", body: formData })

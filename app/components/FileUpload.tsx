@@ -1,40 +1,23 @@
 "use client"
 import { useRef, useState, useEffect } from "react"
 import { useSpeechSynthesis } from "@/lib/speech/tts"
-import { useSpeechRecognition } from "@/lib/speech/stt"
 import { validateFile, ACCEPT } from "@/lib/file/validator"
 import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
 import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
-import { bgmManager } from "@/lib/audio/bgm-manager"
 
 interface FileUploadProps {
   onResult: (text: string) => void
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
 }
 
-const PDF_MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
-  {
-    id: "glm-ocr",
-    label: "📄 GLM-OCR — 텍스트 추출 최적 (30~60초)",
-    tts: "GLM-OCR 모델입니다. 텍스트 추출에 최적화되어 있으며 약 30초에서 60초 걸립니다.",
-  },
-  {
-    id: "qwen2.5vl:7b",
-    label: "💎 OCR Q — 문서 분석 (2~3분)",
-    tts: "OCR 큐 모델입니다. 문서 분석에 적합하며 약 2분에서 3분 걸립니다.",
-  },
-  {
-    id: "llama3.2-vision:11b-instruct-q4_K_M",
-    label: "🦙 Llama Vision — 정밀 분석 (2~3분)",
-    tts: "라마 비전 모델입니다. 정밀한 분석을 제공하며 약 2분에서 3분 걸립니다.",
-  },
-]
-
 export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const analysisTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const isFirstAnalysisRef = useRef(true)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -44,29 +27,8 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
-  const [waitingForModeChoice, setWaitingForModeChoice] = useState(false)
-  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [ocrMode, setOcrMode] = useState<"ocr" | "describe">("describe")
   const tts = useSpeechSynthesis()
-  const stt = useSpeechRecognition()
-
-  // 파일명으로 OCR 모드 자동 판단
-  const shouldUseOCR = (fileName: string): boolean => {
-    const lowerName = fileName.toLowerCase()
-
-    // 문서 키워드
-    const docKeywords = ["통지서", "증명서", "신청서", "등록증", "test_page"]
-    if (docKeywords.some(keyword => lowerName.includes(keyword))) {
-      return true
-    }
-
-    // 숫자가 많은 파일명 (숫자가 전체의 30% 이상)
-    const digitCount = (fileName.match(/\d/g) || []).length
-    if (digitCount / fileName.length > 0.3) {
-      return true
-    }
-
-    return false
-  }
 
   const handleFile = async (file: File, model?: VisionModel) => {
     setError("")
@@ -88,70 +50,73 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       setPreviewUrl(preview.url)
       setPreviewType(preview.type)
 
-      // PDF이면 GLM-OCR 자동 설정
+      // PDF 선택 시 TTS 안내
       if (validation.isPDF) {
-        setUploadedFile(file)
-        setSelectedModel("glm-ocr")
-        tts.speak("PDF 파일이 선택되었습니다. 텍스트를 추출합니다.")
-        return
+        tts.speak(
+          "PDF 파일이 선택되었습니다. " +
+            "PDF는 OCR 큐 또는 라마 비전 모델만 사용 가능합니다. " +
+            "정확한 인식을 위해 OCR 큐를 권장합니다."
+        )
       }
 
-      // 이미지이면 파일명 패턴 체크
+      // 이미지 파일 선택 시 TTS 안내
       if (validation.isImage) {
-        // OCR 자동 판단
-        if (shouldUseOCR(file.name)) {
-          tts.speak("문서 이미지로 인식했습니다. 텍스트를 읽어드립니다.")
-          // OCR 모드로 처리하려면 API에 mode 파라미터 전달 필요
-          // 하지만 현재는 이미지는 항상 Vision으로 처리됨
-          // 일단 그냥 진행
-        } else {
-          // 모드 선택 질문
-          tts.speak(
-            "이미지 설명을 들으시겠어요, 아니면 텍스트를 읽어드릴까요? " +
-            "일번. 이미지 설명. 이번. 텍스트 읽기."
-          )
-          setWaitingForModeChoice(true)
-          setPendingFile(file)
-          stt.startListening()
-
-          // 3초 타임아웃
-          setTimeout(() => {
-            if (waitingForModeChoice) {
-              setWaitingForModeChoice(false)
-              stt.stopListening()
-              tts.speak("이미지 설명 모드로 진행합니다.")
-              // 기본값으로 진행
-            }
-          }, 3000)
-          return
-        }
+        tts.speak(
+          "이미지에서 텍스트를 읽을지, 이미지를 설명할지 선택하세요. " +
+            "일번. 텍스트 읽기. 이번. 이미지 설명."
+        )
       }
+    }
 
-      tts.speak("파일이 선택되었습니다. 분석을 시작합니다.")
+    // PDF이고 모델이 명시되지 않았으면, OCR 모드로 자동 설정
+    if (validation.isPDF && !model) {
+      setUploadedFile(file)
+      setSelectedModel("qwen2.5vl:7b")
+      setOcrMode("ocr") // PDF는 자동으로 OCR 모드
+      return
     }
 
     setLoading(true)
     onStatusChange("processing")
     setUploadedFile(file)
 
-    // 모델별 예상 시간 정보
-    const modelTimeInfo: Record<string, string> = {
-      moondream: "약 5초에서 15초",
-      "gemma3:4b": "약 10초에서 20초",
-      "qwen2.5vl:7b": "약 20초에서 40초",
-      "llama3.2-vision:11b-instruct-q4_K_M": "약 1분에서 3분",
-      "glm-ocr": "약 30초에서 60초",
-    }
+    // BGM 시작
+    tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
+    const audio = new Audio("/sounds/One-step-for-a-better-me.mp3")
+    audio.loop = true
+    audio.play().catch(() => {
+      console.log("[BGM] 재생 실패")
+    })
+    audioRef.current = audio
 
-    // 분석 시작 안내 및 BGM 시작
-    const timeInfo = modelTimeInfo[currentModel] || "잠시"
-    bgmManager.start(currentModel, timeInfo)
+    // 분석 중 안내 타이머 설정
+    isFirstAnalysisRef.current = true
+    const startAnalysisReminder = () => {
+      if (isFirstAnalysisRef.current) {
+        isFirstAnalysisRef.current = false
+        tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
+        analysisTimerRef.current = setInterval(() => {
+          tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
+        }, 30000)
+      }
+    }
+    const initialTimer = setTimeout(startAnalysisReminder, 5000)
 
     try {
-      const result = await analyzeFile(file, currentModel)
+      const result = await analyzeFile(file, currentModel, ocrMode)
+
+      // 타이머 정리
+      clearTimeout(initialTimer)
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
 
       // BGM 정리
-      bgmManager.stop()
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
 
       if (result.error) {
         setError(result.error)
@@ -166,8 +131,18 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       onStatusChange("speaking")
       tts.speak(result.text)
     } catch {
+      // 타이머 정리
+      clearTimeout(initialTimer)
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current)
+        analysisTimerRef.current = null
+      }
+
       // BGM 정리
-      bgmManager.stop()
+      if (audioRef.current) {
+        audioRef.current.pause()
+        audioRef.current = null
+      }
 
       const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
       setError(msg)
@@ -263,7 +238,9 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop())
       }
-      bgmManager.stop()
+      if (audioRef.current) {
+        audioRef.current.pause()
+      }
       if (previewUrl) {
         cleanupPreview(previewUrl)
       }
@@ -277,39 +254,19 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     return () => clearTimeout(timer)
   }, [cameraMode])
 
-  // STT 응답 감지 (모드 선택)
-  useEffect(() => {
-    if (!waitingForModeChoice || !stt.transcript || stt.isListening) return
-
-    const text = stt.transcript.toLowerCase()
-
-    if (text.includes("일번") || text.includes("1번") || text.includes("설명")) {
-      setWaitingForModeChoice(false)
-      stt.stopListening()
-      tts.speak("이미지 설명 모드로 진행합니다.")
-      if (pendingFile) {
-        handleFile(pendingFile) // describe 모드 (기본값)
-        setPendingFile(null)
-      }
-    } else if (text.includes("이번") || text.includes("2번") || text.includes("텍스트") || text.includes("읽기")) {
-      setWaitingForModeChoice(false)
-      stt.stopListening()
-      tts.speak("텍스트 읽기 모드로 진행합니다.")
-      if (pendingFile) {
-        // OCR 모드로 처리 - 하지만 현재 API는 이미지를 항상 Vision으로 처리
-        // 일단 그냥 진행 (추후 API 수정 필요)
-        handleFile(pendingFile)
-        setPendingFile(null)
-      }
-    }
-  }, [stt.transcript, stt.isListening, waitingForModeChoice])
-
   // 모델 변경 시 자동 재분석
   useEffect(() => {
     if (uploadedFile && !loading) {
       handleFile(uploadedFile, selectedModel)
     }
   }, [selectedModel])
+
+  // 모드 변경 시 자동 재분석
+  useEffect(() => {
+    if (uploadedFile && !loading && previewType === "image") {
+      handleFile(uploadedFile, selectedModel)
+    }
+  }, [ocrMode])
 
   return (
     <div style={{ width: "100%", maxWidth: "600px" }}>
@@ -325,7 +282,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             marginBottom: "0.5rem",
           }}
         >
-          {previewType === "pdf" ? "PDF 분석 모델 선택:" : "이미지 분석 모델 선택:"}
+          이미지 분석 모델 선택:
         </label>
         <select
           id="vision-model"
@@ -333,25 +290,13 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           onChange={(e) => {
             const modelId = e.target.value as VisionModel
             setSelectedModel(modelId)
-
-            if (previewType === "pdf") {
-              const model = PDF_MODELS.find((m) => m.id === modelId)
-              if (model) {
-                tts.speak(`${model.id} 모델로 변경되었습니다. ${model.tts}`)
-              }
-            } else {
-              const model = MODELS.find((m) => m.id === modelId)
-              if (model) {
-                tts.speak(`${model.id} 모델로 변경되었습니다. ${model.tts}`)
-              }
+            const model = MODELS.find((m) => m.id === modelId)
+            if (model) {
+              tts.speak(`${modelId} 모델로 변경되었습니다. ${model.tts}`)
             }
           }}
           disabled={loading}
-          aria-label={
-            previewType === "pdf"
-              ? "PDF 분석에 사용할 모델을 선택하세요"
-              : "이미지 분석에 사용할 모델을 선택하세요"
-          }
+          aria-label="이미지 분석에 사용할 모델을 선택하세요"
           style={{
             width: "100%",
             padding: "0.75rem",
@@ -365,24 +310,99 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             opacity: loading ? 0.6 : 1,
           }}
         >
-          {previewType === "pdf"
-            ? PDF_MODELS.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label}
-                </option>
-              ))
-            : MODELS.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.label}
-                </option>
-              ))}
+          {MODELS.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label}
+            </option>
+          ))}
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {previewType === "pdf"
-            ? PDF_MODELS.find((m) => m.id === selectedModel)?.tts
-            : MODELS.find((m) => m.id === selectedModel)?.tts}
+          {MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
+
+      {/* 이미지 모드 토글 (이미지 파일일 때만 표시) */}
+      {previewType === "image" && (
+        <div style={{ marginBottom: "1rem" }}>
+          <p
+            style={{
+              color: "#0D9488",
+              fontWeight: 700,
+              fontSize: "0.9rem",
+              marginBottom: "0.5rem",
+              textAlign: "center",
+            }}
+          >
+            처리 모드:
+          </p>
+          <div
+            style={{
+              display: "flex",
+              gap: "0.5rem",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              onClick={() => {
+                setOcrMode("ocr")
+                tts.speak("텍스트 읽기 모드로 변경되었습니다.")
+              }}
+              disabled={loading}
+              aria-label="텍스트 읽기 모드"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: ocrMode === "ocr" ? "2px solid #0284C7" : "2px solid #E5E7EB",
+                background: ocrMode === "ocr" ? "#0284C7" : "white",
+                color: ocrMode === "ocr" ? "white" : "#1E3A5F",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+                transition: "all 0.2s",
+              }}
+            >
+              📖 텍스트 읽기
+            </button>
+            <button
+              onClick={() => {
+                setOcrMode("describe")
+                tts.speak("이미지 설명 모드로 변경되었습니다.")
+              }}
+              disabled={loading}
+              aria-label="이미지 설명 모드"
+              style={{
+                flex: 1,
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
+                border: ocrMode === "describe" ? "2px solid #0284C7" : "2px solid #E5E7EB",
+                background: ocrMode === "describe" ? "#0284C7" : "white",
+                color: ocrMode === "describe" ? "white" : "#1E3A5F",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                cursor: loading ? "not-allowed" : "pointer",
+                opacity: loading ? 0.6 : 1,
+                transition: "all 0.2s",
+              }}
+            >
+              🖼️ 이미지 설명
+            </button>
+          </div>
+          <p
+            style={{
+              color: "#64748B",
+              fontSize: "0.75rem",
+              marginTop: "0.5rem",
+              textAlign: "center",
+            }}
+          >
+            {ocrMode === "ocr"
+              ? "문서나 이미지의 텍스트를 그대로 추출합니다"
+              : "이미지의 내용을 상세히 설명합니다"}
+          </p>
+        </div>
+      )}
 
       {/* 기본 폴더 경로 안내 */}
       <p style={{ color: "#0D9488", fontSize: "0.85rem", marginBottom: "1rem", textAlign: "center" }}>

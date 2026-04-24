@@ -10,46 +10,6 @@ Cover these in order:
 Do NOT add conclusions or summaries at the end.
 Pure description only.`
 
-const LLAMA_VISION_PROMPT = `Analyze this image completely.
-Output exactly these 6 sections in order:
-
-SECTION 1 - TEXT IN IMAGE:
-Read every single word, number, symbol visible.
-Quote them exactly as written, top to bottom.
-
-SECTION 2 - MAIN CHARACTER:
-Most prominent person or character.
-- Face: expression, gaze direction
-- Hair: color, style, length
-- Clothing: every item, exact colors, patterns, materials
-- Accessories: jewelry, bags, items worn
-- Both hands: exactly what each hand holds or does
-- Posture: exact body position, angle, stance
-- Footwear: type and color
-
-SECTION 3 - OTHER CHARACTERS/ANIMALS:
-Same detail level for each additional character or animal.
-
-SECTION 4 - OBJECTS:
-Every significant object, its location and description.
-
-SECTION 5 - BACKGROUND:
-Complete environment description.
-- Sky: color, clouds, time of day
-- Buildings or nature: specific details
-- Distance elements
-- Colors and lighting conditions
-
-SECTION 6 - ATMOSPHERE:
-Colors dominant in the image.
-Overall mood and feeling conveyed.
-
-RULES:
-- Describe only what is ACTUALLY VISIBLE
-- Never guess or interpret symbolism
-- No summary or conclusion at the end
-- Be specific with colors, positions, directions`
-
 function removeEnglishWords(text: string): string {
   return text
     .replace(/\bsilhouette\b/gi, "실루엣")
@@ -72,14 +32,6 @@ function removeEnglishWords(text: string): string {
     .replace(/\bfloating\b/gi, "떠있는")
     .replace(/\bglowing\b/gi, "빛나는")
     .replace(/\bshimmering\b/gi, "반짝이는")
-    .replace(/\blap\b/gi, "무릎")
-    .replace(/\bshiba\b/gi, "시바")
-    .replace(/\bline\b/gi, "")
-    .replace(/대남자/g, "남성")
-    .replace(/시바라인/g, "시바견")
-    .replace(/\bsitting\b/gi, "앉아있는")
-    .replace(/\bstanding\b/gi, "서있는")
-    .replace(/\bholding\b/gi, "들고있는")
     .replace(/[A-Za-z]{4,}\b/g, (match) => {
       console.log("[후처리] 영어 단어 발견:", match)
       return match
@@ -97,34 +49,19 @@ async function translateToKorean(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "exaone3.5:2.4b",
-        prompt: `위 6섹션을 한국어로 번역해줘.
+        prompt: `다음 영어를 한국어로만 번역해줘.
 
 출력 형식:
 파일명: ${fileName}
 
-1. 이미지 속 텍스트:
-[내용]
+설명:
+[번역 내용만]
 
-2. 주요 인물:
-[내용]
-
-3. 다른 인물/동물:
-[내용]
-
-4. 사물:
-[내용]
-
-5. 배경:
-[내용]
-
-6. 색상과 분위기:
-[내용]
-
-규칙:
-- 각 섹션 제목 유지
-- 영어 단어 금지 (고유명사도 한글 발음으로)
-- 총평 금지
-- lap → 무릎, shiba → 시바견, standing → 서있는
+절대 금지:
+- 규칙 목록 출력 금지
+- 체크리스트 출력 금지
+- "빈 줄 없음", "줄바꿈 사용" 같은 메타 텍스트 금지
+- 번역 내용만 출력
 
 번역:
 ${englishText}`,
@@ -163,34 +100,19 @@ ${englishText}`,
         messages: [
           {
             role: "user",
-            content: `위 6섹션을 한국어로 번역해줘.
+            content: `다음 영어를 한국어로만 번역해줘.
 
 출력 형식:
 파일명: ${fileName}
 
-1. 이미지 속 텍스트:
-[내용]
+설명:
+[번역 내용만]
 
-2. 주요 인물:
-[내용]
-
-3. 다른 인물/동물:
-[내용]
-
-4. 사물:
-[내용]
-
-5. 배경:
-[내용]
-
-6. 색상과 분위기:
-[내용]
-
-규칙:
-- 각 섹션 제목 유지
-- 영어 단어 금지 (고유명사도 한글 발음으로)
-- 총평 금지
-- lap → 무릎, shiba → 시바견, standing → 서있는
+절대 금지:
+- 규칙 목록 출력 금지
+- 체크리스트 출력 금지
+- "빈 줄 없음", "줄바꿈 사용" 같은 메타 텍스트 금지
+- 번역 내용만 출력
 
 번역:
 ${englishText}`,
@@ -230,7 +152,7 @@ export async function extractTextFromImage(
   const timeouts: Record<string, number> = {
     moondream: 30000,
     "gemma3:4b": 60000,
-    "qwen2.5vl:7b": 300000,
+    "qwen2.5vl:7b": 180000,
     "llama3.2-vision:11b-instruct-q4_K_M": 300000,
   }
 
@@ -248,12 +170,6 @@ export async function extractTextFromImage(
       console.log(`[Vision] 시도: ${model}`)
       const timeout = timeouts[model] || 60000
 
-      // llama3.2-vision은 상세 프롬프트 사용
-      const prompt =
-        model === "llama3.2-vision:11b-instruct-q4_K_M"
-          ? LLAMA_VISION_PROMPT
-          : VISION_PROMPT
-
       const res = await fetch("http://localhost:11434/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,7 +179,7 @@ export async function extractTextFromImage(
           messages: [
             {
               role: "user",
-              content: prompt,
+              content: VISION_PROMPT,
               images: [base64],
             },
           ],
