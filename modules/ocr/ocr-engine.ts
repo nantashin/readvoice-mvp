@@ -1,119 +1,114 @@
-const OCR_PROMPT = `이 문서의 모든 텍스트를 정확히 추출해줘.
-규칙:
-- 보이는 텍스트를 그대로 옮겨써
-- 표는 마크다운 표 형식으로 변환
-- 숫자, 코드, 특수문자 정확히
-- 한국어, 영어, 일본어, 중국어 모두 그대로
-- 설명이나 해석 추가 금지
-- 줄바꿈과 구조 최대한 보존`
+import fs from "fs"
+import path from "path"
+import os from "os"
+import { spawnSync } from "child_process"
+
+function buildPythonEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  env.PYTHONIOENCODING = "utf-8"
+
+  // Windows에서 ollama PATH 추가
+  if (process.platform === "win32") {
+    const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
+    if (env.PATH) {
+      env.PATH = `${ollamaPath};${env.PATH}`
+    } else {
+      env.PATH = ollamaPath
+    }
+  }
+
+  return env
+}
+
+function sanitizeOcrText(text: string): string {
+  // ANSI 제어 문자 제거
+  let clean = text.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\[K/g, "")
+  // Braille 문자 제거
+  clean = clean.replace(/[\u2800-\u28FF]/g, "")
+  // 과도한 줄바꿈 정리
+  clean = clean.replace(/\n{3,}/g, "\n\n")
+  return clean.trim()
+}
+
+function isGarbageOcrText(text: string): boolean {
+  if (!text || text.length < 5) return true
+  const readableCount = (text.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []).length
+  const ratio = readableCount / text.length
+  return ratio < 0.5
+}
 
 export async function extractTextOCR(
   buffer: Buffer,
   mimeType: string,
   fileName?: string
 ): Promise<string> {
-  const base64 = buffer.toString("base64")
   const name = fileName || "문서"
+  const tmpDir = os.tmpdir()
+  const tmpImage = path.join(tmpDir, `ocr_${Date.now()}.png`)
 
-  // GLM-OCR 시도 (초경량, OCR 특화)
   try {
-    console.log("[OCR] GLM-OCR 시도...")
-    const res = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "glm-ocr",
-        messages: [
-          {
-            role: "user",
-            content: OCR_PROMPT,
-            images: [base64],
-          },
-        ],
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(60000),
+    fs.writeFileSync(tmpImage, buffer)
+
+    const pythonCmd = process.platform === "win32" ? "python" : "python3"
+    const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
+
+    console.log("[OCR] GLM-OCR Python 스크립트 실행...")
+
+    const result = spawnSync(pythonCmd, [scriptPath, tmpImage], {
+      timeout: 120000,
+      encoding: "utf8",
+      env: buildPythonEnv(),
     })
 
-    if (res.ok) {
-      const data = await res.json()
-      const text = data.message?.content?.trim()
-      if (text && text.length > 10) {
-        console.log("[OCR] GLM-OCR 성공:", text.length, "자")
-        return `파일명: ${name}\n\n${text}`
+    if (fs.existsSync(tmpImage)) {
+      fs.unlinkSync(tmpImage)
+    }
+
+    if (result.error) {
+      throw new Error(`Python 실행 실패: ${result.error.message}`)
+    }
+
+    if (result.status !== 0) {
+      const stderr = result.stderr || "알 수 없는 오류"
+      throw new Error(`GLM-OCR 실패 (code ${result.status}): ${stderr}`)
+    }
+
+    const output = result.stdout.trim()
+    if (!output) {
+      throw new Error("GLM-OCR 빈 응답")
+    }
+
+    try {
+      const parsed = JSON.parse(output)
+
+      if (!parsed.success) {
+        throw new Error(parsed.error || "GLM-OCR 처리 실패")
+      }
+
+      const text = sanitizeOcrText(parsed.text)
+
+      if (isGarbageOcrText(text)) {
+        throw new Error("OCR 결과 품질 불량")
+      }
+
+      console.log(`[OCR] GLM-OCR 성공: ${text.length}자`)
+      return `파일명: ${name}\n\n${text}`
+
+    } catch (e) {
+      if (e instanceof SyntaxError) {
+        throw new Error(`GLM-OCR JSON 파싱 실패: ${output.substring(0, 100)}`)
+      }
+      throw e
+    }
+
+  } catch (error) {
+    if (fs.existsSync(tmpImage)) {
+      try {
+        fs.unlinkSync(tmpImage)
+      } catch (e) {
+        // ignore
       }
     }
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    console.log("[OCR] GLM-OCR 실패:", message)
+    throw error
   }
-
-  // olmOCR-2 fallback
-  try {
-    console.log("[OCR] olmOCR-2 시도...")
-    const res = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "richardyoung/olmocr2:7b-q8",
-        messages: [
-          {
-            role: "user",
-            content:
-              "Extract all text from this document preserving structure and formatting.",
-            images: [base64],
-          },
-        ],
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(180000),
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-      const text = data.message?.content?.trim()
-      if (text && text.length > 10) {
-        console.log("[OCR] olmOCR-2 성공:", text.length, "자")
-        return `파일명: ${name}\n\n${text}`
-      }
-    }
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    console.log("[OCR] olmOCR-2 실패:", message)
-  }
-
-  // qwen2.5vl fallback
-  try {
-    console.log("[OCR] qwen2.5vl 시도...")
-    const res = await fetch("http://localhost:11434/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "qwen2.5vl:7b",
-        messages: [
-          {
-            role: "user",
-            content: OCR_PROMPT,
-            images: [base64],
-          },
-        ],
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(180000),
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-      const text = data.message?.content?.trim()
-      if (text && text.length > 10) {
-        console.log("[OCR] qwen2.5vl 성공:", text.length, "자")
-        return `파일명: ${name}\n\n${text}`
-      }
-    }
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    console.log("[OCR] qwen2.5vl 실패:", message)
-  }
-
-  throw new Error("텍스트 추출 실패. 이미지 품질을 확인해주세요.")
 }

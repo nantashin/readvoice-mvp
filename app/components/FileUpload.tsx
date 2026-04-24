@@ -21,7 +21,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<VisionModel>("moondream")
+  const [selectedModel, setSelectedModel] = useState<VisionModel>("gemma4:e2b")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [previewType, setPreviewType] = useState<PreviewType>("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -71,7 +71,7 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     // PDF이고 모델이 명시되지 않았으면, OCR 모드로 자동 설정
     if (validation.isPDF && !model) {
       setUploadedFile(file)
-      setSelectedModel("qwen2.5vl:7b")
+      setSelectedModel("qwen3.5:9b")
       setOcrMode("ocr") // PDF는 자동으로 OCR 모드
       return
     }

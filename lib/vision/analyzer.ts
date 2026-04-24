@@ -1,7 +1,7 @@
 export type VisionModel =
-  | "moondream"
-  | "gemma3:4b"
-  | "qwen2.5vl:7b"
+  | "gemma4:e2b"
+  | "gemma4:e4b"
+  | "qwen3.5:9b"
   | "llama3.2-vision:11b-instruct-q4_K_M"
 
 export interface AnalysisResult {
@@ -45,19 +45,19 @@ export async function analyzeFile(
 
 export const MODELS: Array<{ id: VisionModel; label: string; tts: string }> = [
   {
-    id: "moondream",
-    label: "🌙 Moondream — 간단한 사진 (5~15초)",
-    tts: "문드림 모델입니다. 간단한 사진 묘사에 적합하며 약 5초에서 15초 걸립니다.",
+    id: "gemma4:e2b",
+    label: "🔮 Gemma4 E2B — 빠른 분석 (5~20초)",
+    tts: "젬마4 이비 모델입니다. 빠른 이미지 분석에 최적화되어 있으며 약 5초에서 20초 걸립니다.",
   },
   {
-    id: "gemma3:4b",
-    label: "🔮 Gemma3 — 빠르고 정확 (10~20초)",
-    tts: "구글 젬마3 모델입니다. 빠르고 정확한 이미지 분석을 제공하며 약 10초에서 20초 걸립니다.",
+    id: "gemma4:e4b",
+    label: "💫 Gemma4 E4B — 균형 (20~40초)",
+    tts: "젬마4 이포비 모델입니다. 빠르고 정확한 분석을 제공하며 약 20초에서 40초 걸립니다.",
   },
   {
-    id: "qwen2.5vl:7b",
-    label: "💎 OCR Q — 문서/텍스트 인식 최적 (20~40초)",
-    tts: "OCR 큐 모델입니다. 문서와 텍스트 인식에 최적화되어 있으며 약 20초에서 40초 걸립니다.",
+    id: "qwen3.5:9b",
+    label: "💎 OCR Q3 — 텍스트/문서 최적 (30~60초)",
+    tts: "OCR 큐 쓰리 모델입니다. 텍스트와 문서 인식에 최적화되어 있으며 약 30초에서 60초 걸립니다.",
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",

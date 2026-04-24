@@ -16,7 +16,8 @@
       "Bash(taskkill:*)",
       "Bash(pip install:*)",
       "Bash(git tag:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(powershell:*)"
     ]
   }
 }

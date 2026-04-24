@@ -147,12 +147,12 @@ export async function extractTextFromImage(
 
   const modelList = selectedModel
     ? [selectedModel]
-    : ["moondream", "gemma3:4b", "qwen2.5vl:7b", "llama3.2-vision:11b-instruct-q4_K_M"]
+    : ["gemma4:e2b", "gemma4:e4b", "qwen3.5:9b", "llama3.2-vision:11b-instruct-q4_K_M"]
 
   const timeouts: Record<string, number> = {
-    moondream: 30000,
-    "gemma3:4b": 60000,
-    "qwen2.5vl:7b": 180000,
+    "gemma4:e2b": 30000,
+    "gemma4:e4b": 60000,
+    "qwen3.5:9b": 90000,
     "llama3.2-vision:11b-instruct-q4_K_M": 300000,
   }
 

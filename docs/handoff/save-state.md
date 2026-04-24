@@ -1,35 +1,33 @@
 # 현재 상태
+날짜: 2026-04-24 16:12
+브랜치: master
 
-날짜: 2026-04-24
+## 최근 커밋
+```
+1b492e7 feat: Codex ?묒뾽 ?뚰겕?뚮줈???먮룞??378749a wip: OCR ?뚯씠?꾨씪???붾쾭源?以?6412ae2 feat: ?쒓뎅??踰덉뿭 ?덉쭏 媛쒖꽑
+c65ba44 feat: Vision ?뚯씠?꾨씪??媛쒖꽑 諛?PDF 紐⑤뜽 異붽?
+270e809 feat: OCR ?꾩슜 ?뚯씠?꾨씪??異붽?
 
-## 프로젝트 개요
-READ VOICE Pro - 시각장애인을 위한 AI 음성 기반 웹 애플리케이션
+```
 
-## 최근 변경 사항
-- PDF OCR 파이프라인 완전 재작성
-- pdfjs-dist 통합 (Embedded Text 추출)
-- GLM-OCR 엔진 안정화
-- Windows UTF-8 인코딩 문제 해결
-- GGML tensor 크기 오류 수정
+## 변경된 파일
+```
+ M .claude/settings.local.json
 
-## 주요 파일
-- `modules/ocr/pdf.ts` - PDF 처리 (embedded text + OCR)
-- `modules/ocr/ocr-engine.ts` - OCR 엔진 (GLM-OCR)
-- `server/glm-ocr.py` - Python GLM-OCR 스크립트
-- `app/api/ocr/route.ts` - API 라우트
+```
 
-## 현재 작동 상태
-✅ PDF embedded text 추출
-✅ 다중 페이지 OCR (최대 3페이지)
-✅ GLM-OCR 통합
-✅ 텍스트 품질 검증
-✅ Windows 인코딩 문제 해결
+## 현재 이슈
+PDF OCR 실패: PowerShell에서는 즉시 성공하지만 브라우저에서 실패. Node.js subprocess로 Python 호출 시 ollama PATH 못 찾는 것으로 추정
 
-## 알려진 이슈
-- 없음 (모든 패치 적용 완료)
-
-## 다음 작업
-- docs/handoff/next-task.md 참조
+## 관련 파일
+- server/glm-ocr.py
+- modules/ocr/ocr-engine.ts
+- modules/ocr/pdf.ts
 
 ## 저장소
 https://github.com/nantashin/readvoice-mvp
+
+## 빌드 상태
+- Node.js: v24.13.0
+- npm: 11.6.2
+- 마지막 빌드: 성공 ✅
