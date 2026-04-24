@@ -3,8 +3,10 @@
 
 $ROOT = "C:\Users\tara0\readvoice-mvp"
 $REPORTS_DIR = "$ROOT\docs\daily-reports"
+$AGENT_LOG_DIR = "C:\Users\tara0\readvoice-pro-agent\업무일지"
 $TODAY = Get-Date -Format "yyyy-MM-dd"
 $REPORT_FILE = "$REPORTS_DIR\$TODAY.md"
+$AGENT_LOG_FILE = "$AGENT_LOG_DIR\$TODAY.md"
 
 Write-Host "📊 일일 보고서 생성 중..." -ForegroundColor Cyan
 
@@ -12,6 +14,11 @@ Write-Host "📊 일일 보고서 생성 중..." -ForegroundColor Cyan
 if (-not (Test-Path $REPORTS_DIR)) {
     New-Item -ItemType Directory -Path $REPORTS_DIR | Out-Null
     Write-Host "✅ 보고서 디렉토리 생성됨: $REPORTS_DIR" -ForegroundColor Green
+}
+
+if (-not (Test-Path $AGENT_LOG_DIR)) {
+    New-Item -ItemType Directory -Path $AGENT_LOG_DIR | Out-Null
+    Write-Host "✅ 업무일지 디렉토리 생성됨: $AGENT_LOG_DIR" -ForegroundColor Green
 }
 
 # 2. Git 정보 수집
@@ -117,12 +124,14 @@ $buildStatus
 **저장소:** https://github.com/nantashin/readvoice-mvp
 "@
 
-# 7. 파일 저장
+# 7. 파일 저장 (두 곳에 동시 저장)
 $reportContent | Set-Content $REPORT_FILE -Encoding UTF8
+$reportContent | Set-Content $AGENT_LOG_FILE -Encoding UTF8
 
 Write-Host ""
 Write-Host "✅ 일일 보고서 생성 완료!" -ForegroundColor Green
-Write-Host "📄 위치: $REPORT_FILE" -ForegroundColor Cyan
+Write-Host "📄 위치 1: $REPORT_FILE" -ForegroundColor Cyan
+Write-Host "📄 위치 2: $AGENT_LOG_FILE" -ForegroundColor Cyan
 Write-Host ""
 
 # 8. 보고서 내용 출력
