@@ -1,7 +1,7 @@
 import fs from "fs"
 import path from "path"
 import os from "os"
-import { execSync, spawnSync } from "child_process"
+import { spawnSync } from "child_process"
 import { extractTextOCR } from "./ocr-engine"
 
 function extractRawText(buffer: Buffer): string {
@@ -54,98 +54,39 @@ export async function extractTextFromPDF(
     console.error("[PDF] 텍스트 파싱 실패:", message)
   }
 
-  // 2단계: pypdfium2 Python 스크립트로 PDF → PNG 변환
-  try {
-    console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
+  // 2단계: pypdfium2로 PDF → PNG 변환
+  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
 
-    const tmpDir = os.tmpdir()
-    const tmpPdf = path.join(tmpDir, `rv_${Date.now()}.pdf`)
+  // PDF → PNG 변환
+  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
+  fs.writeFileSync(tmpPdf, buffer)
 
-    fs.writeFileSync(tmpPdf, buffer)
+  const convertResult = spawnSync(
+    "python",
+    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+    { timeout: 30000, encoding: "utf8" }
+  )
 
+  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+
+  // 임시 PDF 삭제
+  setTimeout(() => {
     try {
-      const pythonCommands = ["python", "python3", "py"]
-      let pythonCmd = "python"
+      fs.unlinkSync(tmpPdf)
+    } catch (e) {}
+  }, 1000)
 
-      // 사용 가능한 python 명령어 찾기
-      for (const cmd of pythonCommands) {
-        try {
-          execSync(`${cmd} --version`, {
-            timeout: 5000,
-            encoding: "utf8",
-          })
-          pythonCmd = cmd
-          console.log(`[PDF] Python 명령어: ${pythonCmd}`)
-          break
-        } catch (e) {
-          continue
-        }
-      }
-
-      const scriptPath = path.join(process.cwd(), "server", "pdf-to-image.py")
-
-      const result = spawnSync(pythonCmd, [scriptPath, tmpPdf, "0"], {
-        timeout: 60000,
-        maxBuffer: 50 * 1024 * 1024, // 50MB 버퍼
-        encoding: "utf8",
-      })
-
-      if (result.error) throw result.error
-      if (result.status !== 0) {
-        console.error("[PDF] Python 오류:", result.stderr)
-        throw new Error("pypdfium2 실행 실패")
-      }
-
-      const parsed = JSON.parse(result.stdout.trim())
-
-      // 파일 삭제 - 약간 대기 후 삭제
-      setTimeout(() => {
-        try {
-          fs.unlinkSync(tmpPdf)
-        } catch (e) {}
-      }, 1000)
-
-      if (parsed.success && parsed.base64) {
-        console.log(
-          `[PDF] pypdfium2 변환 성공, ${parsed.total_pages}페이지`
-        )
-        const base64Image = parsed.base64
-
-        // OCR 엔진으로 텍스트 추출
-        try {
-          const imageBuffer = Buffer.from(base64Image, "base64")
-          const ocrText = await extractTextOCR(imageBuffer, "image/png", name)
-
-          const prefix =
-            parsed.total_pages > 1
-              ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
-              : ""
-
-          // extractTextOCR이 이미 "파일명: ..." 형식으로 반환하므로, prefix만 추가
-          return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : String(e)
-          console.log("[PDF] OCR 엔진 실패:", message)
-          throw e
-        }
-      }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e)
-      console.error("[PDF] pypdfium2 실패:", message)
-      if (fs.existsSync(tmpPdf)) {
-        try {
-          fs.unlinkSync(tmpPdf)
-        } catch (e) {}
-      }
-      throw e
-    }
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e)
-    console.error("[PDF] PDF 변환 실패:", message)
+  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+    const pngBuffer = fs.readFileSync(tmpPng)
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(tmpPng)
+      } catch (e) {}
+    }, 1000)
+    return await extractTextOCR(pngBuffer, "image/png", name)
   }
 
-  // 3단계: 모든 처리 실패
-  throw new Error(
-    "PDF 변환 실패. pypdfium2가 설치되어 있는지 확인하세요."
-  )
+  throw new Error("PDF 변환 실패")
 }

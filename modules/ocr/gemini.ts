@@ -10,34 +10,45 @@ Cover these in order:
 Do NOT add conclusions or summaries at the end.
 Pure description only.`
 
-const LLAMA_VISION_PROMPT = `You are analyzing an image for description.
-Describe in this exact order:
+const LLAMA_VISION_PROMPT = `Analyze this image completely.
+Output exactly these 6 sections in order:
 
-1. MAIN SUBJECT: Most prominent person/character
-   - Exact clothing colors, patterns, style
-   - Accessories worn or carried
-   - Posture: standing/sitting/walking, body angle
-   - What they are holding in each hand, exactly
-   - Facial expression and direction of gaze
+SECTION 1 - TEXT IN IMAGE:
+Read every single word, number, symbol visible.
+Quote them exactly as written, top to bottom.
 
-2. SECONDARY SUBJECTS: Other people or animals
-   - Same level of detail
+SECTION 2 - MAIN CHARACTER:
+Most prominent person or character.
+- Face: expression, gaze direction
+- Hair: color, style, length
+- Clothing: every item, exact colors, patterns, materials
+- Accessories: jewelry, bags, items worn
+- Both hands: exactly what each hand holds or does
+- Posture: exact body position, angle, stance
+- Footwear: type and color
 
-3. OBJECTS: Items in the scene with exact positions
+SECTION 3 - OTHER CHARACTERS/ANIMALS:
+Same detail level for each additional character or animal.
 
-4. BACKGROUND: Sky, buildings, nature, time of day
-   - Specific colors and lighting
+SECTION 4 - OBJECTS:
+Every significant object, its location and description.
 
-5. COLORS: Overall color palette
+SECTION 5 - BACKGROUND:
+Complete environment description.
+- Sky: color, clouds, time of day
+- Buildings or nature: specific details
+- Distance elements
+- Colors and lighting conditions
 
-6. ATMOSPHERE: Mood and feeling
+SECTION 6 - ATMOSPHERE:
+Colors dominant in the image.
+Overall mood and feeling conveyed.
 
-Rules:
-- Be extremely specific about what each hand holds
-- Describe exact posture and body position
-- Never use vague terms
-- Do NOT add interpretations
-- No summary at the end`
+RULES:
+- Describe only what is ACTUALLY VISIBLE
+- Never guess or interpret symbolism
+- No summary or conclusion at the end
+- Be specific with colors, positions, directions`
 
 function removeEnglishWords(text: string): string {
   return text
@@ -86,24 +97,34 @@ async function translateToKorean(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "exaone3.5:2.4b",
-        prompt: `다음 영어를 한국어로만 번역해줘.
+        prompt: `위 6섹션을 한국어로 번역해줘.
 
 출력 형식:
 파일명: ${fileName}
 
-설명:
-[번역 내용만]
+1. 이미지 속 텍스트:
+[내용]
 
-절대 금지:
-- 규칙 목록 출력 금지
-- 체크리스트 출력 금지
-- "빈 줄 없음", "줄바꿈 사용" 같은 메타 텍스트 금지
-- 번역 내용만 출력
+2. 주요 인물:
+[내용]
 
-중요:
-전문용어나 영어 단어를 절대 그대로 쓰지 말고
-자연스러운 한국어로 번역해.
-예: lap → 무릎, shiba → 시바견
+3. 다른 인물/동물:
+[내용]
+
+4. 사물:
+[내용]
+
+5. 배경:
+[내용]
+
+6. 색상과 분위기:
+[내용]
+
+규칙:
+- 각 섹션 제목 유지
+- 영어 단어 금지 (고유명사도 한글 발음으로)
+- 총평 금지
+- lap → 무릎, shiba → 시바견, standing → 서있는
 
 번역:
 ${englishText}`,
@@ -142,19 +163,34 @@ ${englishText}`,
         messages: [
           {
             role: "user",
-            content: `다음 영어를 한국어로만 번역해줘.
+            content: `위 6섹션을 한국어로 번역해줘.
 
 출력 형식:
 파일명: ${fileName}
 
-설명:
-[번역 내용만]
+1. 이미지 속 텍스트:
+[내용]
 
-절대 금지:
-- 규칙 목록 출력 금지
-- 체크리스트 출력 금지
-- "빈 줄 없음", "줄바꿈 사용" 같은 메타 텍스트 금지
-- 번역 내용만 출력
+2. 주요 인물:
+[내용]
+
+3. 다른 인물/동물:
+[내용]
+
+4. 사물:
+[내용]
+
+5. 배경:
+[내용]
+
+6. 색상과 분위기:
+[내용]
+
+규칙:
+- 각 섹션 제목 유지
+- 영어 단어 금지 (고유명사도 한글 발음으로)
+- 총평 금지
+- lap → 무릎, shiba → 시바견, standing → 서있는
 
 번역:
 ${englishText}`,

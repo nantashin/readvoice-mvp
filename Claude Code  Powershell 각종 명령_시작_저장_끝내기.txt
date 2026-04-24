@@ -1,0 +1,86 @@
+Claude Code / Powershell 각종 명령
+
+※현재 저장 후 끝낼 때 - 현재 상태 저장
+[Claude Code 창에]
+git add .
+git commit -m "wip: BGM 매니저 작업 중"
+git push
+
+[각 powershell 창]
+npm run dev 창 → Ctrl+C
+ollama serve 창 → Ctrl+C (또는 그냥 창 닫기)
+Claude Code 창 → /exit 입력 또는 창 닫기
+
+다시 시작할 때 올라마랑 npm run dev만 다시 켜면 끝
+※시작할 때 - powershell 관리자모드 실행
+
+[Claude Code]
+cd C:\Users\tara0\readvoice-mvp
+claude
+
+[창 1 ollama]
+ollama serve
+
+창 2 — 개발 서버
+cd C:\Users\tara0\readvoice-mvp
+npm run dev
+
+브라우저
+http://localhost:3000
+
+Claude Code
+Claude Code는 readvoice-mvp 안에 있는 파일만 읽음.
+Claude Code가 읽게 하려면 md 파일은  readvoice-mvp폴더에 저장할 것.
+
+npm run build : Claude 채팅에서 생성한 코드(자연어 포함) 복붙한 후 실행 명령.
+
+작업 끝내고 다른 장소 가서 다시 시작할 때. 먼저 끝내기. 저장.
+git add .
+git commit -m "wip: BGM 매니저 작업 중"
+git push
+
+
+Powershell
+
+powershell 새창 열고 PS C:\Windows\System32>에서 실행
+npm run dev : 실행
+winget install poppler : # Poppler 설치 (PDF → 이미지 변환 도구)
+	찾음 Poppler [oschwartz10612.Poppler] 버전 25.07.0-0
+	이 응용 프로그램의 라이선스는 그 소유자가 사용자에게 부여했습니다.
+	Microsoft는 타사 패키지에 대한 책임을 지지 않고 라이선스를 부여하지도 않습니다.
+	이 패키지에는 다음 종속성이 필요합니다.
+	   - 패키지
+	       Microsoft.VCRedist.2015+.x64
+	다운로드 중 https://github.com/oschwartz10612/poppler-	windows/releases/download/v25.07.0-0/Release-25.07.0-0.zip
+	  ██████████████████████████████  15.2 MB / 15.2 MB
+ollama list : 올라마에 어떤 언어모델 설치했는지 확인
+ollama pull gemma3:4b : 올라마에서 젬마모델 끌어와서 설치. # Gemma3 4B (공공기관용, 3.3GB) - Gemma4도 곧 나올 예정
+ollama run qwen2.5vl:7b "안녕" : 올라마에서 큐웬모델 실행 후 말 걸기. 안녕하세요! 무엇을 도와드릴까요? 답변 나오면 성공.
+ollama rm llava:7b-v1.5-q4_K_M : 올라마에서 라바모델 삭제
+Get-Content "C:\Users\tara0\readvoice-mvp\.env.local" : 메모장 내용 확인. 아래 내용.
+	LLM_PROVIDER=ollama
+	OLLAMA_MODEL=exaone3.5:2.4b
+	OLLAMA_BASE_URL=http://localhost:11434
+	ANTHROPIC_API_KEY=sk-ant-api03-SEd...kAAAS
+	NEXT_PUBLIC_APP_NAME=READ VOICE Pro
+	GEMINI_API_KEY=gen-lang-client-0194906717
+	UPLOAD_FOLDER_PATH=C:/Users/tara0/ReadVoice_Upload
+	NEXT_PUBLIC_UPLOAD_FOLDER_HINT=리드보이스 업로드 폴더
+notepad C:\Users\tara0\readvoice-mvp\.env.local : 메모장 열어서 위 내용 수정. 예를 들어 API 키 값 등.
+cd C:\Users\tara0\readvoice-mvp : 리드보이스mvp 폴더로 이동
+C:\Users\tara0\readvoice-mvp>npm run dev : 이후 개발 서버 실행
+	▲ Next.js 16.2.4 (Turbopack)
+	- Local:         http://localhost:3001 -> 개발 ui 확인 및 테스트
+	- Network:       http://192.168.0.6:3001
+	- Environments: .env.local
+	Run taskkill /PID 75676 /F to stop it. : Run taskkill /PID 75676 /F 하면 멈춤
+	http://localhost:3001 에서 이미지든 문서든 ocr 테스트 하면 
+	powershell 서버 창에 진행상황 및 결과가 아래와 같이 실시간으로 뜸
+	 GET / 200 in 762ms (next.js: 614ms, application-code: 149ms)
+	[OCR] Using model preference: moondream
+	[OCR] Ollama base URL: http://localhost:11434
+	[OCR] Model-specific timeouts configured: moondream 30s, llava 60s, llama3.2-vision 180s
+	[OCR] Attempting Ollama Moondream...
+	[OCR] ✓ Ollama Moondream succeeded
+---
+

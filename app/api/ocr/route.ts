@@ -27,31 +27,20 @@ export async function POST(req: NextRequest) {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
     const modelStr = (formData.get("model") as string) || "moondream"
-    const modeStr = (formData.get("mode") as string) || ""
 
-    // mode 파라미터 처리
-    let mode: "ocr" | "describe" = "describe"
-
-    if (modeStr === "ocr") {
-      mode = "ocr"
-    } else if (modeStr === "describe") {
-      mode = "describe"
-    } else {
-      // mode 없으면 파일타입으로 자동 판단
-      const isPDF =
-        file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-      mode = isPDF ? "ocr" : "describe"
-    }
+    // 파일 타입 확인
+    const isPDF =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
 
     let text: string
 
-    if (mode === "ocr") {
-      // OCR 모드: 텍스트 그대로 추출
-      console.log("[API] OCR 모드로 처리")
+    if (isPDF) {
+      // PDF: OCR 텍스트 추출만
+      console.log("[API] PDF 텍스트 추출")
       text = await extractTextOCR(buffer, file.type, file.name)
     } else {
-      // Describe 모드: Vision 설명
-      console.log("[API] Describe 모드로 처리")
+      // 이미지: Vision 묘사만
+      console.log("[API] 이미지 Vision 분석")
 
       // 모델 검증
       const validModels = [
