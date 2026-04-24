@@ -16,8 +16,17 @@ if (-not (Test-Path $REPORTS_DIR)) {
 
 # 2. Git 정보 수집
 Write-Host "📝 Git 정보 수집 중..." -ForegroundColor Yellow
+
+# UTF-8 인코딩 설정
+$env:PYTHONIOENCODING = "utf-8"
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
 $gitBranch = git -C $ROOT branch --show-current
-$todayCommits = git -C $ROOT log --since="00:00:00" --until="23:59:59" --oneline --no-merges | Out-String
+$todayCommits = git -C $ROOT log --oneline `
+  --after="$TODAY 00:00" --before="$TODAY 23:59" --no-merges 2>$null |
+  ForEach-Object { [System.Text.Encoding]::UTF8.GetString(
+    [System.Text.Encoding]::Default.GetBytes($_)) }
 $gitStatus = git -C $ROOT status --short | Out-String
 
 # 커밋이 없으면 메시지 표시
