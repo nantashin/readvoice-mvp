@@ -238,5 +238,34 @@ NEXT_PUBLIC_APP_NAME=READ VOICE Pro
 
 ---
 
-**마지막 업데이트:** 2026-04-23  
-**버전:** v1.0.0-pre-codex
+## 버전 관리 규칙
+
+### 버전 저장 (코드나 MD 수정 시 반드시 실행)
+
+```powershell
+.\scripts\version-save.ps1 -Version "v버전" -Message "변경내용"
+```
+
+### 버전 복구
+
+```powershell
+.\scripts\version-restore.ps1 -Version "v1.2.3"
+```
+
+### 버전 형식
+
+- **v1.x.x:** Phase 1 (STT/LLM/TTS)
+- **v2.x.x:** Phase 2 (OCR/Vision) ← **현재**
+- **v3.x.x:** Phase 3 (웹검색)
+- **마이너(x.1.x):** 기능 추가
+- **패치(x.x.1):** 버그 수정
+
+### 버전 히스토리
+
+전체 버전 기록: `docs/versions/VERSION_HISTORY.md`
+
+---
+
+**현재 버전:** v2.4.0  
+**마지막 업데이트:** 2026-04-27  
+**Phase:** Phase 2 (OCR/Vision)

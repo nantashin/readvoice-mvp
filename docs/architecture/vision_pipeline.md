@@ -1,8 +1,20 @@
 # 비전 파이프라인 (Vision Pipeline)
 
+## 핵심 원칙 (변경 불가)
+
+- **기본 방식:** 말로 묻고 → 말로 진행 → 말로 답
+- **보조 방식:** 마우스 클릭
+- **대상:** 시각장애인, 거동불편인, 노인
+- **언어:** 한국어 전용
+- **영어 출력:** 절대 금지
+
 ## 개요
 
 READ VOICE Pro의 비전 파이프라인은 이미지와 PDF 문서를 분석하여 한국어 텍스트로 변환합니다.
+
+**모델별 최적화 전략:**
+- **한국어 직접 출력 모델:** gemma4:e2b, gemma4:e4b, qwen3.5:9b
+- **번역 필요 모델:** llama3.2-vision, glm-ocr
 
 ```
 이미지/PDF 파일
@@ -12,12 +24,10 @@ READ VOICE Pro의 비전 파이프라인은 이미지와 PDF 문서를 분석하
 이미지: 직접 Vision 분석
 PDF: 텍스트 추출 시도 → pypdfium2 변환 → Vision 분석
   ↓
-Vision 모델 순서 실행
-(moondream → gemma3:4b → qwen2.5vl:7b → llama3.2-vision)
+모델 타입 확인
   ↓
-영어 텍스트 결과
-  ↓
-한국어 번역 (EXAONE → Claude)
+한국어 직접 모델: 한국어 프롬프트 → 한국어 직접 출력 → 후처리
+번역 필요 모델: 영어 프롬프트 → 영어 출력 → EXAONE/Claude 번역
   ↓
 최종 한국어 텍스트
 ```
@@ -68,49 +78,77 @@ if (file.size > MAX_SIZE) {
 - **파일:** `modules/ocr/gemini.ts`
 - **함수:** `extractTextFromImage()`
 
-### 처리 흐름
+### Vision 번역 파이프라인 (모델별 최적화)
+
+#### 한국어 직접 출력 모델 (번역 불필요)
 
 ```
-이미지 입력 (JPG, PNG)
+gemma4:e2b / gemma4:e4b / qwen3.5:9b
   ↓
-Base64 인코딩
+한국어 프롬프트
   ↓
-Vision 모델 순서 시도
-  1. moondream (빠름, 기본)
-  2. gemma3:4b (균형)
-  3. qwen2.5vl:7b (정확함)
-  4. llama3.2-vision (최후 수단)
-  ↓ 첫 성공 시 중단
-한국어 번역
+한국어 직접 출력
   ↓
-최종 결과
+영어 단어 후처리 (removeEnglishWords)
+  ↓
+최종 한국어 텍스트
+```
+
+#### 번역 필요 모델
+
+```
+llama3.2-vision / glm-ocr
+  ↓
+영어 프롬프트
+  ↓
+영어 묘사
+  ↓
+EXAONE 번역 시도
+  ↓ 실패 시
+Claude 번역
+  ↓
+영어 단어 후처리
+  ↓
+최종 한국어 텍스트
 ```
 
 ### Vision 모델 구성
 
 #### 모델별 특징
 
-| 모델 | 타임아웃 | 속도 | 정확도 | 장점 |
-|------|--------|------|--------|------|
-| **moondream** | 30초 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 가장 빠름 |
-| **gemma3:4b** | 60초 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 빠르고 정확 |
-| **qwen2.5vl:7b** | 180초 | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 텍스트 인식 최고 |
-| **llama3.2-vision** | 300초 | ⭐⭐ | ⭐⭐⭐⭐ | 마지막 선택지 |
+| 모델 | 타임아웃 | 속도 | 정확도 | 출력 언어 | 장점 |
+|------|--------|------|--------|---------|------|
+| **gemma4:e2b** | 60초 | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 한국어 직접 | 가장 빠르고 번역 불필요 |
+| **gemma4:e4b** | 120초 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 한국어 직접 | 빠르고 정확, 번역 불필요 |
+| **qwen3.5:9b** | 180초 | ⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 한국어 직접 | 텍스트 인식 최고, 번역 불필요 |
+| **llama3.2-vision** | 600초 | ⭐⭐ | ⭐⭐⭐⭐ | 영어 → 번역 | 상세 묘사 (번역 필요) |
+| **glm-ocr** | 90초 | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 영어 → 번역 | 문서 특화 (번역 필요) |
 
-#### Vision 프롬프트
+#### 한국어 직접 프롬프트 (gemma4, qwen3.5용)
 
 ```typescript
-const VISION_PROMPT = `Describe this image vividly and in detail.
-Cover these in order:
-1. All text visible in the image (read exactly as written)
-2. Main subject and what they are doing
-3. Clothing, colors, accessories in detail
-4. Background and environment
-5. Colors and lighting
-6. Overall atmosphere
+const KOREAN_DIRECT_PROMPT = `이 이미지를 한국어로 자세하게 설명해 주세요.
 
-Do NOT add conclusions or summaries at the end.
-Pure description only.`
+다음 순서로 설명해 주세요:
+1. 이미지 속 텍스트: 보이는 글자, 숫자, 기호를 위에서 아래로 정확하게
+2. 주요 인물: 옷차림 색상과 스타일, 자세, 표정, 양손에 든 것
+3. 주변 인물이나 동물
+4. 배경: 하늘, 건물, 자연환경, 조명
+5. 전체적인 색감과 분위기
+
+규칙:
+- 반드시 한국어로만 답해 주세요
+- 영어 단어 사용 금지
+- 설명은 자연스럽고 생생하게
+- 요약이나 총평 금지`
+```
+
+#### 영어 프롬프트 (llama, glm용 - 번역 필요)
+
+```typescript
+const ENGLISH_PROMPT = `Describe this image in vivid detail.
+Order: 1.Text in image 2.Main subject 3.Clothing/colors 4.Background 5.Atmosphere
+Rules: No conclusions. Be specific.`
 ```
 
 ### 구현 패턴

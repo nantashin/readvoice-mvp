@@ -9,7 +9,7 @@ export async function extractText(
   mimeType: string,
   fileName?: string,
   preferredModel?: "moondream" | "llama-vision-q4" | "claude-haiku"
-): Promise<string> {
+): Promise<string | { korean: string; english: string }> {
   if (mimeType === PDF_TYPE) {
     return extractTextFromPDF(buffer, fileName)
   }

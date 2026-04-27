@@ -6,22 +6,58 @@ import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
 import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
 
+const ALL_MODELS = [
+  {
+    id: "gemma4:e2b",
+    label: "1. 구글 2G (gemma4 E2B) — 빠른 분석 (5~20초)",
+    tts: "구글 투지. 빠른 분석에 적합하며 약 5초에서 20초 걸립니다."
+  },
+  {
+    id: "gemma4:e4b",
+    label: "2. 구글 4G (gemma4 E4B) — 균형 (20~40초)",
+    tts: "구글 포지. 빠르고 정확한 분석을 제공하며 약 20초에서 40초 걸립니다."
+  },
+  {
+    id: "llama3.2-vision:11b-instruct-q4_K_M",
+    label: "3. 라마비전 (Llama Vision) — 상세 묘사 (2~3분)",
+    tts: "라마비전. 배경과 분위기까지 가장 상세하게 묘사하며 약 2분에서 3분 걸립니다."
+  },
+  {
+    id: "qwen3.5:9b",
+    label: "4. Q3 (OCR Q3) — 텍스트/문서 최적 (1~2분)",
+    tts: "큐쓰리. 텍스트와 문서 인식에 최적화되어 있으며 약 1분에서 2분 걸립니다."
+  },
+  {
+    id: "glm-ocr",
+    label: "5. 지엘엠 (GLM-OCR) — 문서 전용 (30~60초)",
+    tts: "지엘엠. 문서 텍스트 추출에 최적화되어 있으며 약 30초에서 1분 걸립니다."
+  }
+]
+
+const MODEL_MENU_TTS = `모델을 선택하세요.
+일번. 구글 투지. 가장 빠릅니다.
+이번. 구글 포지. 빠르고 정확합니다.
+삼번. 라마비전. 가장 상세합니다.
+사번. 큐쓰리. 텍스트 전용입니다.
+오번. 지엘엠. 문서 전용입니다.`
+
 interface FileUploadProps {
-  onResult: (text: string) => void
+  onResult: (text: string, original?: string) => void
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
+  selectedModel: string
+  onModelChange: (modelId: string) => void
+  onFileSelected: (file: File) => void
 }
 
-export default function FileUpload({ onResult, onStatusChange }: FileUploadProps) {
+export default function FileUpload({ onResult, onStatusChange, selectedModel, onModelChange, onFileSelected }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const analysisTimerRef = useRef<NodeJS.Timeout | null>(null)
-  const isFirstAnalysisRef = useRef(true)
-  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const recognitionRef = useRef<any>(null)
+  const modelSelectionTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<VisionModel>("gemma4:e2b")
   const [previewUrl, setPreviewUrl] = useState<string>("")
   const [previewType, setPreviewType] = useState<PreviewType>("")
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
@@ -30,7 +66,51 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   const [ocrMode, setOcrMode] = useState<"ocr" | "describe">("describe")
   const tts = useSpeechSynthesis()
 
-  const handleFile = async (file: File, model?: VisionModel) => {
+  // startAnalysis 이벤트 수신
+  useEffect(() => {
+    const handleStartAnalysis = (event: CustomEvent) => {
+      const { file, model } = event.detail
+      if (file) {
+        processFile(file, model)
+      }
+    }
+
+    window.addEventListener("startAnalysis", handleStartAnalysis as EventListener)
+    return () => window.removeEventListener("startAnalysis", handleStartAnalysis as EventListener)
+  }, [ocrMode])
+
+  const processFile = async (file: File, modelId: string) => {
+    setLoading(true)
+    onStatusChange("processing")
+
+    try {
+      const result = await analyzeFile(file, modelId as VisionModel, ocrMode)
+
+      if (result.error) {
+        setError(result.error)
+        onResult(`오류: ${result.error}`)
+        onStatusChange("speaking")
+        return
+      }
+
+      // 분석 완료 - 한국어 번역과 영문 원본을 함께 전달
+      onResult(result.text, result.original)
+      onStatusChange("speaking")
+    } catch {
+      const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
+      setError(msg)
+      onResult(`오류: ${msg}`)
+      onStatusChange("speaking")
+    } finally {
+      setLoading(false)
+      if (inputRef.current) {
+        inputRef.current.value = ""
+      }
+      setFileName("")
+    }
+  }
+
+  const handleFile = async (file: File) => {
     setError("")
     setFileName(file.name)
 
@@ -42,124 +122,24 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
       return
     }
 
-    let currentModel = model || selectedModel
-
-    // 파일 선택 시에만 미리보기 설정 (model 파라미터가 없을 때)
-    if (!model) {
-      const preview = createPreview(file, validation.isPDF, validation.isImage)
-      setPreviewUrl(preview.url)
-      setPreviewType(preview.type)
-
-      // PDF 선택 시 TTS 안내
-      if (validation.isPDF) {
-        tts.speak(
-          "PDF 파일이 선택되었습니다. " +
-            "PDF는 OCR 큐 또는 라마 비전 모델만 사용 가능합니다. " +
-            "정확한 인식을 위해 OCR 큐를 권장합니다."
-        )
-      }
-
-      // 이미지 파일 선택 시 TTS 안내
-      if (validation.isImage) {
-        tts.speak(
-          "이미지에서 텍스트를 읽을지, 이미지를 설명할지 선택하세요. " +
-            "일번. 텍스트 읽기. 이번. 이미지 설명."
-        )
-      }
-    }
-
-    // PDF이고 모델이 명시되지 않았으면, OCR 모드로 자동 설정
-    if (validation.isPDF && !model) {
-      setUploadedFile(file)
-      setSelectedModel("qwen3.5:9b")
-      setOcrMode("ocr") // PDF는 자동으로 OCR 모드
-      return
-    }
-
-    setLoading(true)
-    onStatusChange("processing")
+    // 미리보기 설정
+    const preview = createPreview(file, validation.isPDF, validation.isImage)
+    setPreviewUrl(preview.url)
+    setPreviewType(preview.type)
     setUploadedFile(file)
 
-    // BGM 시작
-    tts.speak("분석하는 동안 pd.watson의 내일의 나를 위한 한 걸음을 들으시겠습니다.")
-    const audio = new Audio("/sounds/One-step-for-a-better-me.mp3")
-    audio.loop = true
-    audio.play().catch(() => {
-      console.log("[BGM] 재생 실패")
-    })
-    audioRef.current = audio
-
-    // 분석 중 안내 타이머 설정
-    isFirstAnalysisRef.current = true
-    const startAnalysisReminder = () => {
-      if (isFirstAnalysisRef.current) {
-        isFirstAnalysisRef.current = false
-        tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
-        analysisTimerRef.current = setInterval(() => {
-          tts.speak("아직 분석 중입니다. 조금 더 기다려 주세요.")
-        }, 30000)
-      }
-    }
-    const initialTimer = setTimeout(startAnalysisReminder, 5000)
-
-    try {
-      const result = await analyzeFile(file, currentModel, ocrMode)
-
-      // 타이머 정리
-      clearTimeout(initialTimer)
-      if (analysisTimerRef.current) {
-        clearInterval(analysisTimerRef.current)
-        analysisTimerRef.current = null
-      }
-
-      // BGM 정리
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
-
-      if (result.error) {
-        setError(result.error)
-        tts.speak(result.error)
-        onStatusChange("speaking")
-        return
-      }
-
-      // 분석 완료 안내
-      tts.speak("분석이 완료되었습니다. 읽어드리겠습니다.")
-      onResult(result.text)
-      onStatusChange("speaking")
-      tts.speak(result.text)
-    } catch {
-      // 타이머 정리
-      clearTimeout(initialTimer)
-      if (analysisTimerRef.current) {
-        clearInterval(analysisTimerRef.current)
-        analysisTimerRef.current = null
-      }
-
-      // BGM 정리
-      if (audioRef.current) {
-        audioRef.current.pause()
-        audioRef.current = null
-      }
-
-      const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
-      setError(msg)
-      tts.speak(msg)
-      onStatusChange("speaking")
-    } finally {
-      setLoading(false)
-      if (inputRef.current) {
-        inputRef.current.value = ""
-      }
-      setFileName("")
-    }
+    // 부모로 파일 전달 (page.tsx에서 처리)
+    onFileSelected(file)
   }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) handleFile(file)
+    if (file) {
+      handleFile(file)
+      // 파일 선택 후 포커스 해제
+      e.target.blur()
+      document.body.focus()
+    }
   }
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -169,7 +149,14 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Enter" || e.key === " ") {
+    // 스페이스바는 page.tsx에서 마이크 제어용으로 사용
+    if (e.code === "Space") {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    if (e.key === "Enter") {
       e.preventDefault()
       inputRef.current?.click()
     }
@@ -232,17 +219,17 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
     setCameraMode(false)
   }
 
-  // 컴포넌트 언마운트 시 카메라 및 BGM 종료
+  // 컴포넌트 언마운트 시 카메라 종료
   useEffect(() => {
     return () => {
       if (cameraStream) {
         cameraStream.getTracks().forEach((track) => track.stop())
       }
-      if (audioRef.current) {
-        audioRef.current.pause()
-      }
       if (previewUrl) {
         cleanupPreview(previewUrl)
+      }
+      if (modelSelectionTimerRef.current) {
+        clearTimeout(modelSelectionTimerRef.current)
       }
     }
   }, [cameraStream, previewUrl])
@@ -256,15 +243,15 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
 
   // 모델 변경 시 자동 재분석
   useEffect(() => {
-    if (uploadedFile && !loading) {
-      handleFile(uploadedFile, selectedModel)
+    if (uploadedFile && !loading && selectedModel) {
+      processFile(uploadedFile, selectedModel)
     }
   }, [selectedModel])
 
   // 모드 변경 시 자동 재분석
   useEffect(() => {
     if (uploadedFile && !loading && previewType === "image") {
-      handleFile(uploadedFile, selectedModel)
+      processFile(uploadedFile, selectedModel)
     }
   }, [ocrMode])
 
@@ -282,42 +269,39 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
             marginBottom: "0.5rem",
           }}
         >
-          이미지 분석 모델 선택:
+          분석 모델 선택:
         </label>
         <select
           id="vision-model"
           value={selectedModel}
           onChange={(e) => {
-            const modelId = e.target.value as VisionModel
-            setSelectedModel(modelId)
-            const model = MODELS.find((m) => m.id === modelId)
-            if (model) {
-              tts.speak(`${modelId} 모델로 변경되었습니다. ${model.tts}`)
-            }
+            const model = e.target.value
+            onModelChange(model)
+            const found = ALL_MODELS.find((m) => m.id === model)
+            if (found) tts.speak(found.tts)
           }}
-          disabled={loading}
-          aria-label="이미지 분석에 사용할 모델을 선택하세요"
+          aria-label="분석에 사용할 모델"
           style={{
             width: "100%",
             padding: "0.75rem",
             borderRadius: "0.5rem",
             border: "2px solid #0284C7",
-            background: loading ? "#f5f5f5" : "white",
+            background: "white",
             color: "#1E3A5F",
             fontSize: "0.95rem",
             fontWeight: 500,
-            cursor: loading ? "not-allowed" : "pointer",
-            opacity: loading ? 0.6 : 1,
+            cursor: "pointer",
+            opacity: 1,
           }}
         >
-          {MODELS.map((model) => (
+          {ALL_MODELS.map((model) => (
             <option key={model.id} value={model.id}>
               {model.label}
             </option>
           ))}
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {MODELS.find((m) => m.id === selectedModel)?.tts}
+          {ALL_MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
 
@@ -347,6 +331,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
                 setOcrMode("ocr")
                 tts.speak("텍스트 읽기 모드로 변경되었습니다.")
               }}
+              onKeyDown={(e) => {
+                if (e.code === "Space") {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }
+              }}
               disabled={loading}
               aria-label="텍스트 읽기 모드"
               style={{
@@ -369,6 +359,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
               onClick={() => {
                 setOcrMode("describe")
                 tts.speak("이미지 설명 모드로 변경되었습니다.")
+              }}
+              onKeyDown={(e) => {
+                if (e.code === "Space") {
+                  e.preventDefault()
+                  e.stopPropagation()
+                }
               }}
               disabled={loading}
               aria-label="이미지 설명 모드"
@@ -409,28 +405,19 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         📁 ReadVoice_Upload
       </p>
 
-      {/* PDF 지원 모델 안내 */}
-      {previewType === "pdf" && (
-        <p
-          style={{
-            color: "#0284C7",
-            fontSize: "0.85rem",
-            marginBottom: "1rem",
-            textAlign: "center",
-          }}
-        >
-          📄 PDF는 OCR Q / Llama Vision 모델만 지원됩니다
-        </p>
-      )}
-
       {/* 파일 업로드 영역 */}
       <div
         role="button"
         tabIndex={0}
         aria-label="파일 업로드 영역. 이미지나 PDF를 드래그하거나 클릭해서 선택하세요."
-        onClick={() => {
+        onClick={(e) => {
           tts.speak("파일 선택 창이 열립니다. 기본 폴더는 리드보이스 업로드 폴더입니다. 이미지 또는 PDF 파일을 선택해 주세요.")
           inputRef.current?.click()
+          // 클릭 후 버튼에서 포커스 제거
+          setTimeout(() => {
+            (document.activeElement as HTMLElement)?.blur()
+            document.body.focus()
+          }, 100)
         }}
         onDrop={handleDrop}
         onDragOver={(e) => e.preventDefault()}
@@ -457,6 +444,12 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
           type="file"
           accept={ACCEPT}
           onChange={handleChange}
+          onKeyDown={(e) => {
+            if (e.code === "Space") {
+              e.preventDefault()
+              e.stopPropagation()
+            }
+          }}
           disabled={loading}
           aria-hidden="true"
           style={{ display: "none" }}
@@ -505,9 +498,48 @@ export default function FileUpload({ onResult, onStatusChange }: FileUploadProps
         </p>
       )}
 
+      {/* 분석 시작 버튼 */}
+      {uploadedFile && !loading && (
+        <button
+          onClick={() => {
+            tts.speak("분석을 시작합니다.")
+            processFile(uploadedFile, selectedModel)
+          }}
+          onKeyDown={(e) => {
+            if (e.code === "Space") {
+              e.preventDefault()
+              e.stopPropagation()
+            }
+          }}
+          aria-label="분석 시작"
+          style={{
+            width: "100%",
+            marginTop: "1rem",
+            padding: "1rem",
+            borderRadius: "0.5rem",
+            border: "none",
+            background: "#0284C7",
+            color: "white",
+            fontSize: "1.125rem",
+            fontWeight: 700,
+            cursor: "pointer",
+            transition: "all 0.2s",
+            boxShadow: "0 4px 16px rgba(2,132,199,0.3)",
+          }}
+        >
+          🚀 분석 시작
+        </button>
+      )}
+
       {/* 카메라 촬영 버튼 */}
       <button
         onClick={startCamera}
+        onKeyDown={(e) => {
+          if (e.code === "Space") {
+            e.preventDefault()
+            e.stopPropagation()
+          }
+        }}
         disabled={loading || cameraMode}
         aria-label="카메라로 촬영"
         style={{

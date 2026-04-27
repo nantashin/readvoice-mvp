@@ -3,9 +3,11 @@ export type VisionModel =
   | "gemma4:e4b"
   | "qwen3.5:9b"
   | "llama3.2-vision:11b-instruct-q4_K_M"
+  | "glm-ocr"
 
 export interface AnalysisResult {
   text: string
+  original?: string
   error?: string
 }
 
@@ -34,6 +36,7 @@ export async function analyzeFile(
 
     return {
       text: data.text,
+      original: data.original, // 이미지 분석일 경우 영문 원본
     }
   } catch {
     return {

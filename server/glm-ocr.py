@@ -47,35 +47,30 @@ def resolve_ollama_bin() -> str:
     raise FileNotFoundError("ollama 실행 파일을 찾을 수 없습니다")
 
 def prepare_image(image_path: str) -> str:
-    """이미지 크기 제한 및 GGML 정렬"""
     try:
         from PIL import Image
-
-        img = Image.open(image_path)
+        img = Image.open(image_path).convert("RGB")
         w, h = img.size
 
-        # 1. 크기 제한 (MAX_IMAGE_SIDE)
-        if w > MAX_IMAGE_SIDE or h > MAX_IMAGE_SIDE:
-            scale = MAX_IMAGE_SIDE / max(w, h)
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            img = img.resize((new_w, new_h), Image.LANCZOS)
-            w, h = new_w, new_h
+        # GLM-OCR은 448의 배수 필요
+        target = 448
+        new_w = max(target, (w // target) * target)
+        new_h = max(target, (h // target) * target)
 
-        # 2. GGML 32픽셀 정렬
-        aligned_w = (w // 32) * 32
-        aligned_h = (h // 32) * 32
+        # 너무 크면 축소
+        if new_w > 1792:
+            new_w = 1792
+        if new_h > 1792:
+            new_h = 1792
 
-        if aligned_w != w or aligned_h != h:
-            img = img.resize((aligned_w, aligned_h), Image.LANCZOS)
+        img_resized = img.resize((new_w, new_h), Image.LANCZOS)
 
-        # 3. 임시 파일로 저장
-        resized_path = image_path.replace('.png', '_prepared.png')
-        img.save(resized_path)
-        return resized_path
-
+        out_path = image_path.replace(".png", "_prep.png")
+        img_resized.save(out_path, "PNG")
+        print(f"[준비] {w}x{h} → {new_w}x{new_h}", file=sys.stderr)
+        return out_path
     except Exception as e:
-        # 준비 실패 시 원본 반환
+        print(f"[준비 실패] {e}", file=sys.stderr)
         return image_path
 
 def run_glm_ocr(image_path: str) -> str:

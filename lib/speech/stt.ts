@@ -30,9 +30,26 @@ export function useSpeechRecognition() {
 
   const startListening = useCallback(() => {
     if (!recogRef.current) return
-    setState(s => ({ ...s, transcript: "", isListening: true, error: null }))
-    recogRef.current.start()
-  }, [])
+
+    // 이미 듣고 있으면 중지 후 재시작
+    if (state.isListening) {
+      try { recogRef.current.stop() } catch(e) { console.log("[STT] stop 오류:", e) }
+      setTimeout(() => {
+        try {
+          setState(s => ({ ...s, transcript: "", isListening: true, error: null }))
+          recogRef.current?.start()
+        } catch(e) { console.log("[STT] restart 오류:", e) }
+      }, 300)
+      return
+    }
+
+    try {
+      setState(s => ({ ...s, transcript: "", isListening: true, error: null }))
+      recogRef.current.start()
+    } catch(e) {
+      console.log("[STT] start 오류:", e)
+    }
+  }, [state.isListening])
 
   const stopListening = useCallback(() => {
     recogRef.current?.stop()

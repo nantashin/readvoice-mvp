@@ -49,12 +49,13 @@ export async function extractTextOCR(
   try {
     fs.writeFileSync(tmpImage, buffer)
 
-    const pythonCmd = process.platform === "win32" ? "python" : "python3"
+    const PYTHON_BIN = process.env.PYTHON_BIN || "python"
     const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
 
+    console.log("[OCR] PYTHON_BIN:", PYTHON_BIN)
     console.log("[OCR] GLM-OCR Python 스크립트 실행...")
 
-    const result = spawnSync(pythonCmd, [scriptPath, tmpImage], {
+    const result = spawnSync(PYTHON_BIN, [scriptPath, tmpImage], {
       timeout: 120000,
       encoding: "utf8",
       env: buildPythonEnv(),

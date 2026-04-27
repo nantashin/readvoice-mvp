@@ -4,6 +4,14 @@ import os from "os"
 import { execSync, spawnSync } from "child_process"
 import { extractTextOCR } from "./ocr-engine"
 
+const MODEL_TIMEOUTS: Record<string, number> = {
+  "gemma4:e2b": 120000,       // 2분
+  "gemma4:e4b": 180000,       // 3분
+  "llama3.2-vision:11b-instruct-q4_K_M": 600000,  // 10분
+  "qwen3.5:9b": 300000,       // 5분
+  "glm-ocr": 120000           // 2분
+}
+
 function extractRawText(buffer: Buffer): string {
   const str = buffer.toString("binary")
   const matches = str.match(/\(([^\)]{2,100})\)/g) || []
@@ -30,7 +38,8 @@ function extractRawText(buffer: Buffer): string {
 
 export async function extractTextFromPDF(
   buffer: Buffer,
-  fileName?: string
+  fileName?: string,
+  selectedModel?: string
 ): Promise<string> {
   const name = fileName || "문서"
 
@@ -64,27 +73,12 @@ export async function extractTextFromPDF(
     fs.writeFileSync(tmpPdf, buffer)
 
     try {
-      const pythonCommands = ["python", "python3", "py"]
-      let pythonCmd = "python"
-
-      // 사용 가능한 python 명령어 찾기
-      for (const cmd of pythonCommands) {
-        try {
-          execSync(`${cmd} --version`, {
-            timeout: 5000,
-            encoding: "utf8",
-          })
-          pythonCmd = cmd
-          console.log(`[PDF] Python 명령어: ${pythonCmd}`)
-          break
-        } catch (e) {
-          continue
-        }
-      }
+      const PYTHON_BIN = process.env.PYTHON_BIN || "python"
+      console.log("[OCR] PYTHON_BIN:", PYTHON_BIN)
 
       const scriptPath = path.join(process.cwd(), "server", "pdf-to-image.py")
 
-      const result = spawnSync(pythonCmd, [scriptPath, tmpPdf, "0"], {
+      const result = spawnSync(PYTHON_BIN, [scriptPath, tmpPdf, "0"], {
         timeout: 60000,
         maxBuffer: 50 * 1024 * 1024, // 50MB 버퍼
         encoding: "utf8",
@@ -110,23 +104,72 @@ export async function extractTextFromPDF(
           `[PDF] pypdfium2 변환 성공, ${parsed.total_pages}페이지`
         )
         const base64Image = parsed.base64
+        const pngBuffer = Buffer.from(base64Image, "base64")
 
-        // OCR 엔진으로 텍스트 추출
-        try {
-          const imageBuffer = Buffer.from(base64Image, "base64")
-          const ocrText = await extractTextOCR(imageBuffer, "image/png", name)
+        const prefix =
+          parsed.total_pages > 1
+            ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
+            : ""
 
-          const prefix =
-            parsed.total_pages > 1
-              ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
-              : ""
+        // 모델별 처리
+        if (selectedModel === "glm-ocr" || !selectedModel) {
+          // GLM-OCR Python 스크립트
+          try {
+            const ocrText = await extractTextOCR(pngBuffer, "image/png", name)
+            return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e)
+            console.log("[PDF] GLM-OCR 실패:", message)
+            throw e
+          }
+        } else {
+          // Ollama Vision 직접 호출
+          const OCR_PROMPT = `이 문서의 모든 텍스트를 정확히 읽어줘.
+위에서 아래로 순서대로 읽어줘.
+줄바꿈은 문단이 바뀔 때만 해줘.
+오타 없이 정확하게 읽어줘.
+설명이나 해석 추가 금지.`
 
-          // extractTextOCR이 이미 "파일명: ..." 형식으로 반환하므로, prefix만 추가
-          return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
-        } catch (e: unknown) {
-          const message = e instanceof Error ? e.message : String(e)
-          console.log("[PDF] OCR 엔진 실패:", message)
-          throw e
+          const models = [selectedModel]
+          const timeout = MODEL_TIMEOUTS[selectedModel || "gemma4:e2b"] || 120000
+
+          for (const model of models) {
+            try {
+              console.log(`[PDF] ${model}으로 분석... (타임아웃: ${timeout / 1000}초)`)
+              const res = await fetch("http://localhost:11434/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model,
+                  messages: [{
+                    role: "user",
+                    content: OCR_PROMPT,
+                    images: [base64Image]
+                  }],
+                  stream: false
+                }),
+                signal: AbortSignal.timeout(timeout)
+              })
+
+              if (!res.ok) {
+                const errText = await res.text()
+                console.error(`[PDF] ${model} HTTP오류:`, res.status, errText)
+                throw new Error(`HTTP ${res.status}`)
+              }
+
+              const data = await res.json()
+              const text = data.message?.content?.trim()
+              if (text && text.length > 10) {
+                console.log(`[PDF] ${model} 성공`)
+                return `파일명: ${name}\n\n${prefix}${text}`
+              }
+            } catch (e: unknown) {
+              const msg = e instanceof Error ? e.message : String(e)
+              console.error(`[PDF] ${model} fetch 실패:`, msg)
+              throw new Error(`${model} 분석 실패: ${msg}`)
+            }
+          }
+          throw new Error("분석 실패. 다른 모델을 선택해 주세요.")
         }
       }
     } catch (e: unknown) {
@@ -142,10 +185,9 @@ export async function extractTextFromPDF(
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e)
     console.error("[PDF] PDF 변환 실패:", message)
+    throw new Error(`PDF 변환 실패: ${message}`)
   }
 
   // 3단계: 모든 처리 실패
-  throw new Error(
-    "PDF 변환 실패. pypdfium2가 설치되어 있는지 확인하세요."
-  )
+  throw new Error("PDF 처리 실패")
 }
