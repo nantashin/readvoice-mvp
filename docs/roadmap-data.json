@@ -1,0 +1,33 @@
+{
+  "version": "v2.4.0",
+  "lastUpdated": "2026-04-27",
+  "totalProgress": 38,
+  "phases": [
+    { "phase": "Phase 1", "name": "STT / LLM / TTS", "status": "done", "pct": 100, "dates": "4.17~4.20", "detail": "음성입력→AI→음성출력" },
+    { "phase": "Phase 2", "name": "OCR / Vision", "status": "current", "pct": 65, "dates": "4.21~5.10", "detail": "이미지·PDF 분석" },
+    { "phase": "Phase 3", "name": "웹 검색 Agent", "status": "todo", "pct": 0, "dates": "5.11~5.25", "detail": "말로 검색·요약" },
+    { "phase": "Phase 4", "name": "인증 / 구독", "status": "todo", "pct": 0, "dates": "5.26~6.15", "detail": "무료→유료 전환" },
+    { "phase": "Phase 5", "name": "배포 패키지", "status": "todo", "pct": 0, "dates": "6.16~7.15", "detail": "키오스크·EXE·서버" }
+  ],
+  "sprints": [
+    {
+      "sprint": "Sprint 1", "dates": "4.21~4.22", "status": "done",
+      "items": ["Vision 모델 파이프라인", "EXAONE 한국어 번역", "BGM 시스템 5곡", "코드 리팩토링 90%+"]
+    },
+    {
+      "sprint": "Sprint 2", "dates": "4.23~4.24", "status": "done",
+      "items": ["Codex 협업 워크플로우", "gemma4/qwen3.5 모델 교체", "GLM-OCR 설치", "음성 메뉴 트리 구축"]
+    },
+    {
+      "sprint": "Sprint 3", "dates": "4.27~5.03", "status": "current",
+      "items": ["한국어 직접 출력 파이프라인", "PDF OCR Tesseract", "음성 모델 선택 안정화", "라이선스 고지 추가"]
+    },
+    {
+      "sprint": "Sprint 4", "dates": "5.04~5.10", "status": "todo",
+      "items": ["대화 기록 저장", "PWA 설치 지원", "카메라 자동 촬영", "Phase 2 완료 태그"]
+    }
+  ],
+  "estimatedCompletion": "2026-07-11",
+  "totalWeeks": 13,
+  "currentWeek": 2
+}

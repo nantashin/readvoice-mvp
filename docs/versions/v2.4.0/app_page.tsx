@@ -1,0 +1,875 @@
+"use client"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { useSpeechRecognition } from "@/lib/speech/stt"
+import { useSpeechSynthesis } from "@/lib/speech/tts"
+import { parseSpeedCommand, saveSpeechRate, loadSpeechRate } from "@/lib/speech/speed-control"
+import FileUpload from "@/app/components/FileUpload"
+import MicButton from "@/app/components/MicButton"
+import ResponseDisplay from "@/app/components/ResponseDisplay"
+import { bgmManager } from "@/lib/audio/bgm-manager"
+
+type MicState = "off" | "listening" | "processing" | "speaking"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "ask_original"
+
+const INTRO_TTS = `안녕하세요! READ VOICE Pro예요.
+스페이스바를 누르고 말씀해 주시면 바로 도와드릴게요.
+말씀이 끝나시면 스페이스바를 다시 눌러 주세요.
+스페이스바를 빠르게 두 번 누르시면 처음으로 돌아가요.`
+
+const MAIN_MENU_TTS = `어떻게 도와드릴까요?
+일번. 무언가 검색해 드릴게요.
+이번. 사진이나 이미지를 분석해 드릴게요.
+삼번. 문서를 읽어드릴게요.
+사번. 분석 모델을 바꿔드릴게요.
+오번. 처음으로 돌아가요.
+스페이스바를 누르고 번호나 원하시는 걸 말씀해 주세요.`
+
+const MODEL_MENU_TTS = `어떤 모델로 분석해 드릴까요?
+일번. 구글 2G. 가장 빠르게 분석해드려요.
+이번. 구글 4G. 빠르면서 정확하게 분석해드려요.
+삼번. 라마비전. 가장 꼼꼼하게 분석해드려요.
+사번. 큐쓰리. 텍스트 인식에 강해요.
+오번. 지엘엠. 문서 읽기에 특화되어 있어요.
+스페이스바를 누르고 번호로 말씀해 주세요.`
+
+export default function Home() {
+  const [micState, setMicState] = useState<MicState>("off")
+  const [menuState, setMenuState] = useState<MenuState>("idle")
+  const [response, setResponse] = useState("")
+  const [history, setHistory] = useState<{ role: string; content: string }[]>([])
+  const [speechRate, setSpeechRate] = useState<number>(1.0)
+  const [selectedModel, setSelectedModel] = useState<string>("gemma4:e2b")
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [pendingAction, setPendingAction] = useState<string>("")
+  const [originalText, setOriginalText] = useState<string>("")
+
+  const micStateRef = useRef<MicState>("off")
+  const menuStateRef = useRef<MenuState>("idle")
+  const isWaitingSpeedChoiceRef = useRef<boolean>(false)
+
+  const stt = useSpeechRecognition()
+  const tts = useSpeechSynthesis()
+
+  const lastSpaceTimeRef = useRef<number>(0)
+  const spaceCountRef = useRef<number>(0)
+  const spaceTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 초기 설정
+  useEffect(() => {
+    setSpeechRate(loadSpeechRate())
+
+    // 업로드 폴더 자동 생성
+    fetch("/api/watch-folder").catch(() => {
+      console.log("[폴더 생성] 실패")
+    })
+
+    // 페이지 포커스 강제 설정
+    document.body.focus()
+    document.body.setAttribute("tabindex", "0")
+    document.body.focus()
+
+    // 1초 후 안내
+    const timer = setTimeout(() => {
+      window.speechSynthesis.cancel()
+      const utt = new SpeechSynthesisUtterance(INTRO_TTS)
+      utt.lang = "ko-KR"
+      utt.rate = 1.0
+      utt.pitch = 1.5  // 솔 높이 (밝고 경쾌한 음성)
+      window.speechSynthesis.speak(utt)
+    }, 1000)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  useEffect(() => {
+    micStateRef.current = micState
+  }, [micState])
+
+  useEffect(() => {
+    menuStateRef.current = menuState
+  }, [menuState])
+
+  const speak = useCallback((text: string, rate?: number, pitch: number = 1.5) => {
+    window.speechSynthesis.cancel()
+    const utt = new SpeechSynthesisUtterance(text)
+    utt.lang = "ko-KR"
+    utt.rate = rate || speechRate
+    utt.pitch = pitch  // 솔 높이 (밝고 경쾌한 음성)
+    window.speechSynthesis.speak(utt)
+  }, [speechRate])
+
+  const startListening = useCallback(() => {
+    speak("네, 말씀해 주세요.")
+    setTimeout(() => {
+      stt.startListening()
+      setMicState("listening")
+    }, 500)
+  }, [stt, speak])
+
+  const stopListening = useCallback(() => {
+    stt.stopListening()
+    setMicState("off")
+  }, [stt])
+
+  // 싱글탭: 현재 동작 중지 + 마이크 ON
+  const handleSingleSpace = useCallback(() => {
+    console.log("[handleSingleSpace] TTS/BGM 중지")
+    window.speechSynthesis.cancel()
+    bgmManager.stop()
+
+    if (stt.isListening) {
+      // 마이크 ON 상태 → 마이크 끄고 STT 결과 처리
+      console.log("[마이크] 완료")
+      stopListening()
+      return
+    }
+
+    // 마이크 OFF 상태 → 마이크 켜기
+    console.log("[마이크] 시작")
+    startListening()
+  }, [stt.isListening, startListening, stopListening])
+
+  // 더블탭: 처음 메뉴로
+  const handleDoubleSpace = useCallback(() => {
+    console.log("[handleDoubleSpace] 더블탭 - 메인 메뉴, TTS/BGM 중지")
+    window.speechSynthesis.cancel()
+    bgmManager.stop()
+    stt.stopListening()
+    setMicState("off")
+    setMenuState("main_menu")
+    speak(MAIN_MENU_TTS)
+  }, [stt, speak])
+
+  // 스페이스바 이벤트 등록
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return
+
+      if (e.code === "Space") {
+        e.preventDefault()
+
+        const now = Date.now()
+
+        // 더블탭 감지 (300ms 이내 두 번)
+        if (now - lastSpaceTimeRef.current < 300) {
+          spaceCountRef.current = 2
+          if (spaceTimerRef.current) clearTimeout(spaceTimerRef.current)
+          handleDoubleSpace()
+          lastSpaceTimeRef.current = 0
+          spaceCountRef.current = 0
+          return
+        }
+
+        lastSpaceTimeRef.current = now
+        spaceCountRef.current = 1
+
+        // 싱글탭은 300ms 후 처리
+        if (spaceTimerRef.current) clearTimeout(spaceTimerRef.current)
+        spaceTimerRef.current = setTimeout(() => {
+          if (spaceCountRef.current === 1) {
+            console.log("[스페이스] 싱글탭 - 마이크 토글")
+            handleSingleSpace()
+          }
+          spaceCountRef.current = 0
+        }, 300)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [handleSingleSpace, handleDoubleSpace])
+
+  // STT 결과 처리
+  useEffect(() => {
+    if (!stt.isListening && stt.transcript && micStateRef.current === "listening") {
+      const transcript = stt.transcript.trim()
+      if (!transcript) return
+
+      console.log("[STT] 결과:", transcript, "메뉴상태:", menuStateRef.current)
+      setMicState("processing")
+      handleVoiceResult(transcript)
+    }
+  }, [stt.isListening, stt.transcript])
+
+  const handleVoiceResult = async (transcript: string) => {
+    const currentMenu = menuStateRef.current
+    console.log("[처리] 현재 메뉴:", currentMenu, "입력:", transcript)
+
+    const t = transcript.toLowerCase()
+
+    // 속도 변경 명령 확인
+    const speedCmd = parseSpeedCommand(transcript, isWaitingSpeedChoiceRef.current)
+    if (speedCmd !== null) {
+      if (speedCmd.message === "speed_menu") {
+        setMicState("speaking")
+        const menu = "읽기 속도를 선택해 주세요. 1번, 보통 속도. 2번, 조금 빠르게. 3번, 빠르게. 4번, 매우 빠르게. 번호로 말씀해 주세요."
+        speak(menu, 1.0)
+        isWaitingSpeedChoiceRef.current = true
+        setTimeout(() => setMicState("off"), 3000)
+        return
+      }
+
+      setSpeechRate(speedCmd.rate)
+      saveSpeechRate(speedCmd.rate)
+      setMicState("speaking")
+      speak(speedCmd.message, 1.0)
+      isWaitingSpeedChoiceRef.current = false
+      setTimeout(() => setMicState("off"), 2000)
+      return
+    }
+
+    // 현재 모델 선택 대기 중
+    if (currentMenu === "model_select") {
+      let modelId = ""
+      let modelName = ""
+
+      if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
+        modelId = "gemma4:e2b"
+        modelName = "구글 투지"
+      } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
+        modelId = "gemma4:e4b"
+        modelName = "구글 포지"
+      } else if (/삼번|3|라마|llama|비전/i.test(t)) {
+        modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+        modelName = "라마비전"
+      } else if (/사번|4|큐|qwen|q3/i.test(t)) {
+        modelId = "qwen3.5:9b"
+        modelName = "큐쓰리"
+      } else if (/오번|5|지엘엠|glm/i.test(t)) {
+        modelId = "glm-ocr"
+        modelName = "지엘엠"
+      }
+
+      if (modelId) {
+        setSelectedModel(modelId)
+        setPendingAction(`model:${modelId}`)
+
+        let confirmMsg = ""
+        if (modelId === "llama3.2-vision:11b-instruct-q4_K_M") {
+          confirmMsg = `${modelName}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
+        } else {
+          confirmMsg = `${modelName}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
+        }
+
+        speak(confirmMsg)
+        setMenuState("confirm")
+
+        const delay = (confirmMsg.length / 10) * 1000 / speechRate + 1000
+        setTimeout(() => {
+          setMicState("off")
+          startListening()
+        }, delay)
+      } else {
+        speak("죄송해요, 잘 못 들었어요. 일번부터 오번 중에 번호로 말씀해 주세요.")
+        const delay = (35 / 10) * 1000 / speechRate + 500
+        setTimeout(() => {
+          setMicState("off")
+          startListening()
+        }, delay)
+      }
+      return
+    }
+
+    // 현재 확인 대기 중
+    if (currentMenu === "confirm") {
+      if (/그래|좋아|네|예|맞아|실행|해줘|시작/.test(t)) {
+        executeCurrentAction()
+        return
+      }
+      if (/아니|취소|싫어|말고/.test(t)) {
+        const msg1 = "알겠어요, 모델 선택으로 돌아갈게요."
+        speak(msg1)
+        const delay1 = (msg1.length / 10) * 1000 / speechRate + 300
+        setTimeout(() => {
+          speak(MODEL_MENU_TTS)
+          setMenuState("model_select")
+          const delay2 = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
+          setTimeout(() => {
+            setMicState("off")
+            startListening()
+          }, delay2)
+        }, delay1)
+        return
+      }
+      // 네/아니오가 아닌 경우
+      speak("네 또는 아니오로 말씀해 주세요.")
+      const delay = (18 / 10) * 1000 / speechRate + 500
+      setTimeout(() => {
+        setMicState("off")
+        startListening()
+      }, delay)
+      return
+    }
+
+    // 원문 듣기 확인 대기 중
+    if (currentMenu === "ask_original") {
+      if (/그래|좋아|네|예|맞아|들려|듣고|원해/.test(t)) {
+        setMicState("speaking")
+        speak("원문을 들려드릴게요.")
+        setTimeout(() => {
+          // 영어로 원문 읽기
+          const utt = new SpeechSynthesisUtterance(originalText)
+          utt.lang = "en-US"  // 영어 음성
+          utt.rate = speechRate
+          utt.pitch = 1.0
+          utt.onend = () => {
+            speak("원문 듣기가 끝났어요.")
+            setTimeout(() => {
+              setMenuState("idle")
+              setMicState("off")
+            }, 1500)
+          }
+          window.speechSynthesis.speak(utt)
+        }, 1500)
+        return
+      }
+      if (/아니|취소|싫어|말고|괜찮|됐/.test(t)) {
+        speak("알겠어요. 끝났어요.")
+        setTimeout(() => {
+          setMenuState("idle")
+          setMicState("off")
+        }, 1500)
+        return
+      }
+      // 네/아니오가 아닌 경우
+      speak("네 또는 아니오로 말씀해 주세요.")
+      const delay = (18 / 10) * 1000 / speechRate + 500
+      setTimeout(() => {
+        setMicState("off")
+        startListening()
+      }, delay)
+      return
+    }
+
+    // 일반 상태 - 의도 파악
+    const intent = await detectIntent(transcript)
+
+    switch (intent) {
+      case "search":
+        speak("네, 바로 찾아드릴게요.")
+        setTimeout(() => doChat(transcript), 1500)
+        break
+      case "ocr":
+        speak("문서 읽기 모드예요. 파일을 올려주시거나 카메라 버튼을 눌러주세요.")
+        setMenuState("ocr")
+        setMicState("off")
+        break
+      case "image":
+        speak("이미지 분석 모드예요. 파일을 올려주세요.")
+        setMenuState("image")
+        setMicState("off")
+        break
+      case "model_change":
+        speak(MODEL_MENU_TTS)
+        setMenuState("model_select")
+        const delayModelChange = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
+        setTimeout(() => {
+          setMicState("off")
+          startListening()
+        }, delayModelChange)
+        break
+      case "confirm":
+        executeCurrentAction()
+        break
+      case "cancel":
+        speak("알겠어요, 취소할게요.")
+        setTimeout(() => {
+          speak(MAIN_MENU_TTS)
+          setMenuState("main_menu")
+          setMicState("off")
+        }, 1500)
+        break
+      case "restart":
+        speak("처음으로 돌아갈게요.")
+        setTimeout(() => {
+          speak(INTRO_TTS)
+          setMenuState("idle")
+          setMicState("off")
+        }, 1000)
+        break
+      case "menu_1":
+        handleMenuChoice(1)
+        break
+      case "menu_2":
+        handleMenuChoice(2)
+        break
+      case "menu_3":
+        handleMenuChoice(3)
+        break
+      case "menu_4":
+        handleMenuChoice(4)
+        break
+      case "menu_5":
+        handleMenuChoice(5)
+        break
+      case "menu_6":
+        handleMenuChoice(6)
+        break
+      case "chat":
+      default:
+        doChat(transcript)
+        break
+    }
+  }
+
+  const detectIntent = async (text: string): Promise<string> => {
+    const t = text.toLowerCase()
+
+    if (/검색|찾아|알려|뭐야|어때/.test(t)) return "search"
+    if (/문서|읽어|오씨알|ocr|파일|pdf/.test(t)) return "ocr"
+    if (/이미지|사진|그림/.test(t)) return "image"
+    if (/모델|바꿔|바꾸기/.test(t)) return "model_change"
+    if (/그래|그렇다|좋아|네|예|맞아|실행|시작|해줘/.test(t)) return "confirm"
+    if (/아니|취소|싫어|말고/.test(t)) return "cancel"
+    if (/처음|돌아가|시작으로/.test(t)) return "restart"
+
+    if (/일번|1번/.test(t)) return "menu_1"
+    if (/이번|2번/.test(t)) return "menu_2"
+    if (/삼번|3번/.test(t)) return "menu_3"
+    if (/사번|4번/.test(t)) return "menu_4"
+    if (/오번|5번/.test(t)) return "menu_5"
+    if (/육번|6번/.test(t)) return "menu_6"
+
+    return "chat"
+  }
+
+  const handleMenuChoice = (num: number) => {
+    if (menuStateRef.current === "main_menu") {
+      switch (num) {
+        case 1:
+          speak("검색 모드예요. 검색할 내용을 말씀해 주세요.")
+          setTimeout(() => {
+            setMicState("off")
+            startListening()
+          }, 2000)
+          break
+        case 2:
+          speak("이미지 분석 모드예요. 파일을 올려주세요.")
+          setMenuState("image")
+          setMicState("off")
+          break
+        case 3:
+          speak("문서 읽기 모드예요. 파일을 올려주시거나 카메라 버튼을 눌러주세요.")
+          setMenuState("ocr")
+          setMicState("off")
+          break
+        case 4:
+          speak(MODEL_MENU_TTS)
+          setMenuState("model_select")
+          const delayMenu4 = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
+          setTimeout(() => {
+            setMicState("off")
+            startListening()
+          }, delayMenu4)
+          break
+        case 5:
+          speak("처음으로 돌아갈게요.")
+          setTimeout(() => {
+            speak(INTRO_TTS)
+            setMenuState("idle")
+            setMicState("off")
+          }, 1000)
+          break
+      }
+    } else if (menuStateRef.current === "model_select") {
+      const models = [
+        { id: "gemma4:e2b", name: "구글 투지" },
+        { id: "gemma4:e4b", name: "구글 포지" },
+        { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
+        { id: "qwen3.5:9b", name: "큐쓰리" },
+        { id: "glm-ocr", name: "지엘엠" }
+      ]
+
+      if (num >= 1 && num <= 5) {
+        const model = models[num - 1]
+        setSelectedModel(model.id)
+        setPendingAction(`model:${model.id}`)
+
+        let confirmMsg = ""
+        if (model.id === "llama3.2-vision:11b-instruct-q4_K_M") {
+          confirmMsg = `${model.name}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
+        } else {
+          confirmMsg = `${model.name}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
+        }
+
+        speak(confirmMsg)
+        setMenuState("confirm")
+
+        const delayMenuConfirm = (confirmMsg.length / 10) * 1000 / speechRate + 500
+        setTimeout(() => {
+          setMicState("off")
+          startListening()
+        }, delayMenuConfirm)
+      }
+    }
+  }
+
+  const executeCurrentAction = () => {
+    if (!pendingAction) {
+      setMicState("off")
+      return
+    }
+
+    const [type, value] = pendingAction.split(":")
+
+    if (type === "model") {
+      const modelNames: Record<string, string> = {
+        "gemma4:e2b": "구글 투지",
+        "gemma4:e4b": "구글 포지",
+        "llama3.2-vision:11b-instruct-q4_K_M": "라마비전",
+        "qwen3.5:9b": "큐쓰리",
+        "glm-ocr": "지엘엠"
+      }
+
+      let message = ""
+      if (value === "llama3.2-vision:11b-instruct-q4_K_M") {
+        message = "라마비전으로 분석할게요. 조금 시간이 걸릴 수 있어요. 최대 10분 정도요. 음악 들으시면서 편하게 기다려 주세요."
+      } else {
+        message = `${modelNames[value]}으로 분석 시작할게요. 잠시만 기다려 주세요.`
+      }
+
+      speak(message)
+
+      setMenuState("idle")
+      setMicState("processing")
+
+      // TTS 끝난 후 BGM + 분석 시작
+      const delay = (message.length / 10) * 1000 / speechRate + 500
+      console.log("[executeCurrentAction] TTS 끝난 후 BGM 시작 예정, delay:", delay)
+      setTimeout(() => {
+        // BGM 시작
+        console.log("[executeCurrentAction] BGM 시작 시도")
+        bgmManager.start(speechRate)
+
+        // 파일 분석 시작
+        if (pendingFile) {
+          console.log("[executeCurrentAction] 파일 분석 시작:", pendingFile.name)
+          window.dispatchEvent(new CustomEvent("startAnalysis", { detail: { file: pendingFile, model: value } }))
+          setPendingFile(null)
+        } else {
+          console.log("[executeCurrentAction] pendingFile 없음")
+        }
+      }, delay)
+
+      setPendingAction("")
+    }
+  }
+
+  const doChat = async (text: string) => {
+    setMicState("processing")
+    setResponse("")
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history }),
+      })
+
+      if (!res.ok) throw new Error("API error")
+
+      const reader = res.body!.getReader()
+      const dec = new TextDecoder()
+      let full = ""
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        full += dec.decode(value)
+        setResponse(full)
+      }
+
+      setHistory((h) => [...h, { role: "user", content: text }, { role: "assistant", content: full }])
+      setMicState("speaking")
+      speak(full)
+
+      // TTS 끝나면 자동으로 off
+      setTimeout(() => {
+        setMicState("off")
+      }, (full.length / 10) * 1000 / speechRate)
+    } catch {
+      const err = "오류가 발생했습니다. 다시 시도해 주세요."
+      setResponse(err)
+      speak(err)
+      setMicState("speaking")
+      setTimeout(() => setMicState("off"), 3000)
+    }
+  }
+
+  const micStateLabel: Record<MicState, string> = {
+    off: "스페이스바를 누르고 말씀하세요",
+    listening: "듣고 있습니다... (스페이스바로 완료)",
+    processing: "처리 중...",
+    speaking: "읽는 중... (스페이스바로 중지)",
+  }
+
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        background: "#EBF5FF",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "2rem 1.5rem",
+        fontFamily: "Pretendard Variable, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: "600px",
+          margin: "0 auto",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: "2.25rem",
+            fontWeight: 900,
+            color: "#0284C7",
+            marginBottom: "0.5rem",
+            textAlign: "center",
+          }}
+        >
+          READ VOICE Pro
+        </h1>
+
+        <p
+          style={{
+            color: "#475569",
+            marginBottom: "2.5rem",
+            fontSize: "1.125rem",
+            textAlign: "center",
+          }}
+        >
+          시각장애인을 위한 AI 음성 도우미
+        </p>
+
+        <div
+          style={{
+            width: "120px",
+            height: "120px",
+            borderRadius: "50%",
+            background: micState === "listening" ? "#0284C7" : micState === "processing" ? "#F59E0B" : micState === "speaking" ? "#10B981" : "#94A3B8",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "3rem",
+            color: "white",
+            marginBottom: "1.5rem",
+            transition: "all 0.3s",
+            animation: micState === "listening" ? "pulse 1.5s infinite" : "none",
+          }}
+        >
+          {micState === "listening" ? "🎤" : micState === "processing" ? "⏳" : micState === "speaking" ? "🔊" : "💤"}
+        </div>
+
+        <p
+          aria-live="polite"
+          style={{
+            marginBottom: "1.5rem",
+            color: "#0369A1",
+            fontWeight: 600,
+            fontSize: "1.125rem",
+            textAlign: "center",
+          }}
+        >
+          {micStateLabel[micState]}
+        </p>
+
+        <div
+          style={{
+            marginBottom: "1.5rem",
+            display: "flex",
+            gap: "8px",
+            justifyContent: "center",
+            width: "100%",
+          }}
+        >
+          {[1, 1.2, 1.5, 2].map((rate) => (
+            <button
+              key={rate}
+              onClick={() => {
+                setSpeechRate(rate)
+                saveSpeechRate(rate)
+                speak(`읽기 속도가 ${rate}배로 변경되었습니다.`, 1.0)
+              }}
+              aria-label={`읽기 속도 ${rate}배`}
+              style={{
+                minWidth: "48px",
+                minHeight: "48px",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                border: "none",
+                cursor: "pointer",
+                fontWeight: 600,
+                fontSize: "1rem",
+                transition: "all 0.2s",
+                background: speechRate === rate ? "#0284C7" : "#EBF5FF",
+                color: speechRate === rate ? "white" : "#0284C7",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {rate}x
+            </button>
+          ))}
+        </div>
+
+        {stt.transcript && (
+          <div
+            style={{
+              marginBottom: "1.5rem",
+              background: "#DBEAFE",
+              borderRadius: "0.75rem",
+              padding: "1rem",
+              width: "100%",
+            }}
+          >
+            <p
+              style={{
+                color: "#1E3A5F",
+                fontSize: "1rem",
+                margin: 0,
+              }}
+            >
+              인식: {stt.transcript}
+            </p>
+          </div>
+        )}
+
+        <ResponseDisplay
+          response={response}
+          status={micState === "speaking" ? "speaking" : "idle"}
+          onStop={() => {
+            window.speechSynthesis.cancel()
+            setMicState("off")
+          }}
+        />
+
+        {stt.error && (
+          <p
+            style={{
+              color: "#EF4444",
+              marginBottom: "1rem",
+              fontSize: "1rem",
+            }}
+          >
+            {stt.error}
+          </p>
+        )}
+
+        <div
+          style={{
+            marginTop: "2rem",
+            width: "100%",
+          }}
+        >
+          <p
+            style={{
+              color: "#0D9488",
+              fontWeight: 700,
+              fontSize: "1rem",
+              marginBottom: "0.75rem",
+              textAlign: "center",
+            }}
+          >
+            📄 파일에서 텍스트 읽기 (이미지 / PDF)
+          </p>
+          <FileUpload
+            onResult={(text, original) => {
+              // BGM 중지
+              console.log("[onResult] 분석 완료, BGM 중지")
+              bgmManager.stop()
+              setResponse(text)
+              setMicState("speaking")
+
+              // 영문 원본이 있으면 저장
+              if (original) {
+                setOriginalText(original)
+              }
+
+              speak("분석이 끝났어요! 읽어드릴게요.")
+              setTimeout(() => {
+                speak(text)
+
+                // 한국어 TTS가 끝난 후, 원문이 있으면 물어보기
+                // 원문이 빈 문자열이 아니고 실제 내용이 있는 경우에만 (번역 모델인 경우만)
+                if (original && original.length > 10) {
+                  const textDuration = (text.length / 10) * 1000 / speechRate + 1000
+                  setTimeout(() => {
+                    const askMsg = "원문도 들으시겠어요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요."
+                    speak(askMsg)
+                    setMenuState("ask_original")
+                    const askDuration = (askMsg.length / 10) * 1000 / speechRate + 500
+                    setTimeout(() => {
+                      setMicState("off")
+                      startListening()
+                    }, askDuration)
+                  }, textDuration)
+                } else {
+                  // 원문이 없으면 (PDF 또는 한국어 직접 모델) 그냥 종료
+                  const textDuration = (text.length / 10) * 1000 / speechRate + 500
+                  setTimeout(() => {
+                    setMicState("off")
+                  }, textDuration)
+                }
+              }, 2000)
+            }}
+            onStatusChange={(s) => {
+              if (s === "processing") setMicState("processing")
+              else if (s === "speaking") setMicState("speaking")
+              else setMicState("off")
+            }}
+            selectedModel={selectedModel}
+            onModelChange={(modelId) => {
+              setSelectedModel(modelId)
+            }}
+            onFileSelected={(file) => {
+              setPendingFile(file)
+              const msg = "파일이 선택됐어요. 어떤 모델로 분석해 드릴까요?"
+              speak(msg)
+              const delay1 = (msg.length / 10) * 1000 / speechRate + 300
+              setTimeout(() => {
+                speak(MODEL_MENU_TTS)
+                setMenuState("model_select")
+                setMicState("off")
+              }, delay1)
+            }}
+          />
+        </div>
+
+        <p
+          style={{
+            marginTop: "2rem",
+            color: "#94A3B8",
+            fontSize: "0.95rem",
+            textAlign: "center",
+          }}
+        >
+          스페이스바 1회: 마이크 ON/OFF<br />
+          스페이스바 2회: 메인 메뉴
+        </p>
+      </div>
+
+      <style jsx>{`
+        @keyframes pulse {
+          0%, 100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.05);
+            opacity: 0.9;
+          }
+        }
+      `}</style>
+    </main>
+  )
+}
