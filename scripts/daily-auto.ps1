@@ -12,7 +12,7 @@ Write-Host "================================================" -ForegroundColor C
 Write-Host ""
 
 # 1. roadmap-data.json 읽기
-Write-Host "[1/3] 로드맵 데이터 읽는 중..." -ForegroundColor Yellow
+Write-Host "[1/4] 로드맵 데이터 읽는 중..." -ForegroundColor Yellow
 $roadmapPath = "$ROOT\docs\roadmap-data.json"
 if (Test-Path $roadmapPath) {
     $roadmapData = Get-Content $roadmapPath | ConvertFrom-Json
@@ -26,7 +26,7 @@ if (Test-Path $roadmapPath) {
 Write-Host ""
 
 # 2. generate-roadmap.js 실행 → PPTX 생성
-Write-Host "[2/3] 로드맵 PPTX 생성 중..." -ForegroundColor Yellow
+Write-Host "[2/4] 로드맵 PPTX 생성 중..." -ForegroundColor Yellow
 try {
     Push-Location $ROOT
     $output = node "$ROOT\scripts\generate-roadmap.js" 2>&1
@@ -43,7 +43,7 @@ try {
 Write-Host ""
 
 # 3. daily-report.ps1 실행 → MD 보고서 생성
-Write-Host "[3/3] 일일 보고서 MD 생성 중..." -ForegroundColor Yellow
+Write-Host "[3/4] 일일 보고서 MD 생성 중..." -ForegroundColor Yellow
 $dailyReportScript = "$ROOT\scripts\daily-report.ps1"
 if (Test-Path $dailyReportScript) {
     try {
@@ -57,8 +57,45 @@ if (Test-Path $dailyReportScript) {
 }
 Write-Host ""
 
+# 4. 자동 커밋 & 푸시
+Write-Host "[4/4] Git 자동 커밋 & 푸시..." -ForegroundColor Yellow
+try {
+    Push-Location $ROOT
+
+    # 변경사항 확인
+    $status = git status --porcelain 2>&1
+
+    if ($status) {
+        # 변경사항이 있으면 커밋
+        git add . 2>&1 | Out-Null
+        $commitMsg = "chore: 자동 일일 보고서 $(Get-Date -Format 'yyyy-MM-dd')"
+        git commit -m $commitMsg 2>&1 | Out-Null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  커밋 완료: $commitMsg" -ForegroundColor Green
+
+            # 푸시
+            git push 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "  푸시 완료" -ForegroundColor Green
+            } else {
+                Write-Host "  경고: 푸시 실패" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  경고: 커밋 실패" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  변경사항 없음 (커밋 건너뜀)" -ForegroundColor Yellow
+    }
+
+    Pop-Location
+} catch {
+    Write-Host "  오류: $($_.Exception.Message)" -ForegroundColor Red
+}
+Write-Host ""
+
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "자동 보고서 생성 완료" -ForegroundColor Green
+Write-Host "오후 8시 자동 실행 완료" -ForegroundColor Green
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "생성된 파일:" -ForegroundColor Cyan
