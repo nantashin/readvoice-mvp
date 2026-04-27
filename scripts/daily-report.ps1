@@ -15,9 +15,18 @@ if (-not (Test-Path $REPORT_DIR)) {
 $roadmapPath = "$ROOT\docs\roadmap-data.json"
 $roadmapData = Get-Content $roadmapPath -Encoding UTF8 -Raw | ConvertFrom-Json
 
+# 근무 시간 데이터 읽기
+$workHoursFile = "$ROOT\docs\work-hours\$DATE.json"
+$workHours = $null
+if (Test-Path $workHoursFile) {
+    $workHours = Get-Content $workHoursFile -Encoding UTF8 | ConvertFrom-Json
+}
+
 # Git 커밋 히스토리 (오늘 것만)
 Push-Location $ROOT
 $todayCommits = git log --since="midnight" --pretty=format:"%h|%s|%an|%ar" 2>$null
+$firstCommitTime = git log --since="midnight" --reverse --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
+$lastCommitTime = git log --since="midnight" --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
 Pop-Location
 
 # 커밋 파싱
@@ -46,6 +55,31 @@ $report += "**날짜:** $DATE`n"
 $report += "**버전:** $($roadmapData.version)`n"
 $report += "**진행률:** $($roadmapData.totalProgress)%`n`n"
 $report += "---`n`n"
+
+# 근무 시간 섹션
+$report += "## 근무 시간`n`n"
+
+if ($workHours) {
+    $report += "### 수동 기록`n"
+    $report += "- **서버 켠 시간:** $($workHours.serverStart)`n"
+    $report += "- **서버 끈 시간:** $($workHours.serverEnd)`n"
+    $report += "- **업무 시작:** $($workHours.workStart)`n"
+    $report += "- **업무 마감:** $($workHours.workEnd)`n"
+} else {
+    $report += "### 수동 기록`n"
+    $report += "- **미입력** (work-time-tracker.ps1 실행 필요)`n"
+}
+
+$report += "`n### Git 활동 시간`n"
+if ($firstCommitTime -and $lastCommitTime) {
+    $report += "- **첫 커밋:** $firstCommitTime`n"
+    $report += "- **마지막 커밋:** $lastCommitTime`n"
+    $report += "- **총 커밋:** $($commits.Count)개`n"
+} else {
+    $report += "- **커밋 없음**`n"
+}
+
+$report += "`n---`n`n"
 
 $report += "## 현재 상태`n`n"
 $report += "### Phase 진행 현황`n"
