@@ -4,12 +4,12 @@ import os from "os"
 import { execSync, spawnSync } from "child_process"
 import { extractTextOCR } from "./ocr-engine"
 
+// PDF OCR 모델별 타임아웃 (라마비전은 이미지 묘사 전용으로 PDF OCR 제외)
+// PDF OCR 순서: Tesseract (빠름) → PaddleOCR (표/레이아웃) → gemma4:e4b (fallback)
 const MODEL_TIMEOUTS: Record<string, number> = {
   "gemma4:e2b": 120000,       // 2분
-  "gemma4:e4b": 180000,       // 3분
-  "llama3.2-vision:11b-instruct-q4_K_M": 600000,  // 10분
+  "gemma4:e4b": 180000,       // 3분 (PDF OCR fallback)
   "qwen3.5:9b": 300000,       // 5분
-  "glm-ocr": 120000           // 2분
 }
 
 function extractRawText(buffer: Buffer): string {
@@ -112,18 +112,31 @@ export async function extractTextFromPDF(
             : ""
 
         // 모델별 처리
-        if (selectedModel === "glm-ocr" || !selectedModel) {
-          // GLM-OCR Python 스크립트
+        // llama3.2-vision은 이미지 묘사 전용, PDF OCR에서는 제외
+        if (selectedModel === "llama3.2-vision:11b-instruct-q4_K_M") {
+          console.log("[PDF] llama3.2-vision은 PDF OCR에서 사용 불가 → Tesseract/gemma4:e4b 사용")
+          // Tesseract 시도 후 실패 시 gemma4:e4b로 fallback
+          try {
+            const ocrText = await extractTextOCR(pngBuffer, "image/png", name)
+            return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
+          } catch (e: unknown) {
+            console.log("[PDF] Tesseract 실패, gemma4:e4b로 전환")
+            selectedModel = "gemma4:e4b"
+          }
+        }
+
+        if (!selectedModel) {
+          // 기본값: Tesseract 시도
           try {
             const ocrText = await extractTextOCR(pngBuffer, "image/png", name)
             return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
           } catch (e: unknown) {
             const message = e instanceof Error ? e.message : String(e)
-            console.log("[PDF] GLM-OCR 실패:", message)
+            console.log("[PDF] Tesseract 실패:", message)
             throw e
           }
         } else {
-          // Ollama Vision 직접 호출
+          // Ollama Vision 직접 호출 (gemma4:e2b, gemma4:e4b, qwen3.5:9b만)
           const OCR_PROMPT = `이 문서의 모든 텍스트를 정확히 읽어줘.
 위에서 아래로 순서대로 읽어줘.
 줄바꿈은 문단이 바뀔 때만 해줘.
@@ -131,7 +144,7 @@ export async function extractTextFromPDF(
 설명이나 해석 추가 금지.`
 
           const models = [selectedModel]
-          const timeout = MODEL_TIMEOUTS[selectedModel || "gemma4:e2b"] || 120000
+          const timeout = MODEL_TIMEOUTS[selectedModel || "gemma4:e4b"] || 120000
 
           for (const model of models) {
             try {

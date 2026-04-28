@@ -1,3 +1,8 @@
+// 이미지 묘사 모델 순서 (PDF OCR 제외, 이미지 describe 전용)
+// 1. gemma4:e2b (빠름, 5~20초)
+// 2. gemma4:e4b (균형, 20~40초)
+// 3. llama3.2-vision (정밀, 2~3분, 사용자 직접 선택 시만)
+
 // 한국어 직접 출력 가능 모델
 const KOREAN_NATIVE_MODELS = [
   "gemma4:e2b",
@@ -5,7 +10,7 @@ const KOREAN_NATIVE_MODELS = [
   "qwen3.5:9b"
 ]
 
-// 번역 필요 모델
+// 번역 필요 모델 (이미지 묘사 전용, PDF OCR 제외)
 const NEEDS_TRANSLATION_MODELS = [
   "llama3.2-vision:11b-instruct-q4_K_M"
 ]
