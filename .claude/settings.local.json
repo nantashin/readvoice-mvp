@@ -21,7 +21,9 @@
       "Bash(git:*)",
       "Bash(dir \"C:\\\\Users\\\\tara0\\\\readvoice-mvp\\\\public\\\\sounds\\\\\" 2>&1)",
       "Bash(npm list:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(cmd.exe:*)"
     ]
   }
 }

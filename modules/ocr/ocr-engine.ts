@@ -27,84 +27,64 @@ export async function extractTextOCR(
 ): Promise<string> {
   const name = fileName || "문서"
   const tmpDir = os.tmpdir()
-  const tmpImage = path.join(tmpDir, `ocr_${Date.now()}.png`)
 
-  try {
-    fs.writeFileSync(tmpImage, buffer)
+  const PYTHON_BIN = process.env.PYTHON_BIN ||
+    "C:\\Users\\tara0\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
 
-    const PYTHON_BIN = process.env.PYTHON_BIN ||
-      "C:\\Users\\tara0\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
-    const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
+  const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
+  const env = {
+    ...process.env,
+    PATH: `${ollamaPath};${process.env.PATH}`,
+    PYTHONIOENCODING: "utf-8"
+  }
 
-    const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
-    const env = {
-      ...process.env,
-      PATH: `${ollamaPath};${process.env.PATH}`,
-      PYTHONIOENCODING: "utf-8"
-    }
-
-    console.log("[OCR] PYTHON_BIN:", PYTHON_BIN)
-    console.log("[OCR] Ollama PATH:", ollamaPath)
-    console.log("[OCR] GLM-OCR Python 스크립트 실행...")
-
-    const result = spawnSync(PYTHON_BIN, [scriptPath, tmpImage], {
-      timeout: 90000,
-      encoding: "utf8",
-      env,
-    })
-
-    console.log("[OCR] exit code:", result.status)
-    console.log("[OCR] stderr:", result.stderr?.slice(0, 200))
-
-    if (fs.existsSync(tmpImage)) {
-      fs.unlinkSync(tmpImage)
-    }
-
-    if (result.error) {
-      throw new Error(`Python 실행 실패: ${result.error.message}`)
-    }
-
-    if (result.status !== 0) {
-      const stderr = result.stderr || "알 수 없는 오류"
-      throw new Error(`GLM-OCR 실패 (code ${result.status}): ${stderr}`)
-    }
-
-    const output = result.stdout.trim()
-    if (!output) {
-      throw new Error("GLM-OCR 빈 응답")
-    }
-
+  // 1순위: Tesseract (빠름, 인쇄 텍스트)
+  const TESS_SCRIPT = path.join(process.cwd(), "server", "tesseract-ocr.py")
+  if (fs.existsSync(TESS_SCRIPT)) {
+    const tmpImg = path.join(tmpDir, `tess_${Date.now()}.png`)
     try {
-      const parsed = JSON.parse(output)
+      fs.writeFileSync(tmpImg, buffer)
+      console.log("[OCR] Tesseract 시도...")
 
-      if (!parsed.success) {
-        throw new Error(parsed.error || "GLM-OCR 처리 실패")
+      const result = spawnSync(PYTHON_BIN, [TESS_SCRIPT, tmpImg], {
+        timeout: 30000,
+        encoding: "utf8",
+        env
+      })
+
+      // 파일 정리
+      setTimeout(() => {
+        try {
+          if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg)
+        } catch (e) {
+          // ignore
+        }
+      }, 1000)
+
+      if (result.status === 0 && result.stdout) {
+        const data = JSON.parse(result.stdout.trim())
+        if (data.success && data.text?.length > 10) {
+          const text = sanitizeOcrText(data.text)
+          if (!isGarbageOcrText(text)) {
+            console.log("[OCR] Tesseract 성공:", text.length, "자")
+            return `파일명: ${name}\n\n${text}`
+          }
+        }
       }
-
-      const text = sanitizeOcrText(parsed.text)
-
-      if (isGarbageOcrText(text)) {
-        throw new Error("OCR 결과 품질 불량")
-      }
-
-      console.log(`[OCR] GLM-OCR 성공: ${text.length}자`)
-      return `파일명: ${name}\n\n${text}`
-
+      console.log("[OCR] Tesseract 결과 없음 → Vision으로")
     } catch (e) {
-      if (e instanceof SyntaxError) {
-        throw new Error(`GLM-OCR JSON 파싱 실패: ${output.substring(0, 100)}`)
-      }
-      throw e
-    }
-
-  } catch (error) {
-    if (fs.existsSync(tmpImage)) {
+      console.log("[OCR] Tesseract 실패:", e)
+      // 파일 정리
       try {
-        fs.unlinkSync(tmpImage)
-      } catch (e) {
+        if (fs.existsSync(tmpImg)) fs.unlinkSync(tmpImg)
+      } catch (cleanupErr) {
         // ignore
       }
     }
-    throw error
   }
+
+  // 2순위: Vision 모델 (gemma4/qwen3.5)
+  // extractTextOCR는 이미지 OCR 전용이므로 여기서는 에러를 던지고
+  // 호출하는 쪽(modules/ocr/index.ts)에서 Vision으로 처리하도록 함
+  throw new Error("Tesseract OCR 실패 - Vision 모델로 전환 필요")
 }
