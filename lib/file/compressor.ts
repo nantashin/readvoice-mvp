@@ -1,4 +1,3 @@
-const MAX_SIZE = 2 * 1024 * 1024  // 2MB (800KB → 2MB로 변경)
 const MIN_PX = 1200  // 작은 이미지 스케일업 기준
 
 async function loadImage(file: File): Promise<HTMLImageElement> {
@@ -13,9 +12,16 @@ async function loadImage(file: File): Promise<HTMLImageElement> {
   })
 }
 
-export async function compressImage(file: File): Promise<string> {
+export async function compressImage(file: File, selectedModel?: string): Promise<string> {
   const img = await loadImage(file)
   let { naturalWidth: w, naturalHeight: h } = img
+
+  // 모델별 최대 크기 설정
+  const MAX_SIZE = selectedModel?.includes("llama")
+    ? 800 * 1024     // 라마: 800KB
+    : 2 * 1024 * 1024  // 나머지: 2MB
+
+  console.log(`[이미지] 모델: ${selectedModel || "기본"}, 최대 크기: ${(MAX_SIZE / 1024).toFixed(0)}KB`)
 
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")!
@@ -35,7 +41,7 @@ export async function compressImage(file: File): Promise<string> {
   let quality = 0.95
   let result = canvas.toDataURL("image/jpeg", quality)
 
-  // 2MB 초과 시 품질 낮춤
+  // MAX_SIZE 초과 시 품질 낮춤
   while (result.length * 0.75 > MAX_SIZE && quality > 0.5) {
     quality -= 0.05
     result = canvas.toDataURL("image/jpeg", quality)

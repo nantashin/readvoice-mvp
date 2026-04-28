@@ -15,7 +15,7 @@ const NEEDS_TRANSLATION_MODELS = [
   "llama3.2-vision:11b-instruct-q4_K_M"
 ]
 
-// 통합 프롬프트 (모든 모델 공통)
+// 통합 프롬프트 (gemma4, qwen3.5용)
 const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 
 1. 이미지 속 텍스트: 보이는 모든 글자, 숫자, 기호
@@ -26,10 +26,36 @@ const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 
 반드시 한국어로만 답해줘. 영어 금지.`
 
-// 영어 프롬프트 (llama, glm용 - 번역 필요)
-const ENGLISH_PROMPT = `Describe this image in vivid detail.
-Order: 1.Text in image 2.Main subject 3.Clothing/colors 4.Background 5.Atmosphere
-Rules: No conclusions. Be specific.`
+// llama3.2-vision 전용 프롬프트 (매우 상세한 영문 분석 → 번역)
+const LLAMA_PROMPT = `Analyze this image completely.
+
+SECTION 1 - ALL TEXT IN IMAGE:
+Read every word, number, character visible. Top to bottom.
+
+SECTION 2 - MAIN CHARACTER:
+- Face: expression, gaze direction
+- Hair: color, style
+- Clothing: every item, exact colors, patterns
+- Both hands: exactly what each holds
+- Posture: exact body position
+
+SECTION 3 - OTHER CHARACTERS/ANIMALS:
+Same detail for each.
+
+SECTION 4 - OBJECTS:
+Every significant object with position.
+
+SECTION 5 - BACKGROUND:
+Sky, buildings, nature, time of day, colors, lighting.
+
+SECTION 6 - COLORS AND ATMOSPHERE:
+Dominant colors and overall mood.
+
+Rules:
+- Describe ONLY what is ACTUALLY VISIBLE
+- Never guess or interpret
+- No summary at the end
+- Be extremely specific`
 
 function removeEnglishWords(text: string): string {
   return text
@@ -199,9 +225,10 @@ export async function extractTextFromImage(
   const model = selectedModel || "gemma4:e2b"
 
   const isKoreanNative = KOREAN_NATIVE_MODELS.includes(model)
-  const prompt = isKoreanNative ? UNIFIED_PROMPT : ENGLISH_PROMPT
+  const isLlama = model === "llama3.2-vision:11b-instruct-q4_K_M"
+  const prompt = isKoreanNative ? UNIFIED_PROMPT : (isLlama ? LLAMA_PROMPT : UNIFIED_PROMPT)
 
-  console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}`)
+  console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}, 라마: ${isLlama}`)
 
   // Ollama health check
   try {
@@ -219,6 +246,12 @@ export async function extractTextFromImage(
     "llama3.2-vision:11b-instruct-q4_K_M": 600000,
   }
   const timeout = timeouts[model] || 120000
+
+  // 라마비전 fetch 직전 로그
+  if (isLlama) {
+    console.log("[라마] 이미지 크기:", buffer.length, "bytes")
+    console.log("[라마] timeout:", timeout, "ms")
+  }
 
   try {
     const res = await fetch("http://localhost:11434/api/chat", {

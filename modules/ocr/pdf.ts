@@ -4,12 +4,12 @@ import os from "os"
 import { execSync, spawnSync } from "child_process"
 import { extractTextOCR } from "./ocr-engine"
 
-// PDF OCR 모델별 타임아웃 (라마비전은 이미지 묘사 전용으로 PDF OCR 제외)
-// PDF OCR 순서: Tesseract (빠름) → PaddleOCR (표/레이아웃) → gemma4:e4b (fallback)
+// 모델별 타임아웃 (라마비전 10분 복구)
 const MODEL_TIMEOUTS: Record<string, number> = {
   "gemma4:e2b": 120000,       // 2분
-  "gemma4:e4b": 180000,       // 3분 (PDF OCR fallback)
+  "gemma4:e4b": 180000,       // 3분
   "qwen3.5:9b": 300000,       // 5분
+  "llama3.2-vision:11b-instruct-q4_K_M": 600000,  // 10분
 }
 
 function extractRawText(buffer: Buffer): string {
@@ -112,19 +112,6 @@ export async function extractTextFromPDF(
             : ""
 
         // 모델별 처리
-        // llama3.2-vision은 이미지 묘사 전용, PDF OCR에서는 제외
-        if (selectedModel === "llama3.2-vision:11b-instruct-q4_K_M") {
-          console.log("[PDF] llama3.2-vision은 PDF OCR에서 사용 불가 → Tesseract/gemma4:e4b 사용")
-          // Tesseract 시도 후 실패 시 gemma4:e4b로 fallback
-          try {
-            const ocrText = await extractTextOCR(pngBuffer, "image/png", name)
-            return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
-          } catch (e: unknown) {
-            console.log("[PDF] Tesseract 실패, gemma4:e4b로 전환")
-            selectedModel = "gemma4:e4b"
-          }
-        }
-
         if (!selectedModel) {
           // 기본값: Tesseract 시도
           try {
