@@ -7,25 +7,19 @@ const KOREAN_NATIVE_MODELS = [
 
 // 번역 필요 모델
 const NEEDS_TRANSLATION_MODELS = [
-  "llama3.2-vision:11b-instruct-q4_K_M",
-  "glm-ocr"
+  "llama3.2-vision:11b-instruct-q4_K_M"
 ]
 
-// 한국어 직접 프롬프트 (gemma4, qwen3.5용)
-const KOREAN_DIRECT_PROMPT = `이 이미지를 한국어로 자세하게 설명해 주세요.
+// 통합 프롬프트 (모든 모델 공통)
+const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 
-다음 순서로 설명해 주세요:
-1. 이미지 속 텍스트: 보이는 글자, 숫자, 기호를 위에서 아래로 정확하게
-2. 주요 인물: 옷차림 색상과 스타일, 자세, 표정, 양손에 든 것
-3. 주변 인물이나 동물
-4. 배경: 하늘, 건물, 자연환경, 조명
+1. 이미지 속 텍스트: 보이는 모든 글자, 숫자, 기호
+2. 주요 인물: 의상, 자세, 표정, 양손에 든 것
+3. 주변 인물이나 동물: 있으면 상세히, 없으면 "없음"
+4. 배경: 하늘, 건물, 자연, 조명 색감
 5. 전체적인 색감과 분위기
 
-규칙:
-- 반드시 한국어로만 답해 주세요
-- 영어 단어 사용 금지
-- 설명은 자연스럽고 생생하게
-- 요약이나 총평 금지`
+반드시 한국어로만 답해줘. 영어 금지.`
 
 // 영어 프롬프트 (llama, glm용 - 번역 필요)
 const ENGLISH_PROMPT = `Describe this image in vivid detail.
@@ -200,7 +194,7 @@ export async function extractTextFromImage(
   const model = selectedModel || "gemma4:e2b"
 
   const isKoreanNative = KOREAN_NATIVE_MODELS.includes(model)
-  const prompt = isKoreanNative ? KOREAN_DIRECT_PROMPT : ENGLISH_PROMPT
+  const prompt = isKoreanNative ? UNIFIED_PROMPT : ENGLISH_PROMPT
 
   console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}`)
 
@@ -218,7 +212,6 @@ export async function extractTextFromImage(
     "gemma4:e4b": 120000,
     "qwen3.5:9b": 180000,
     "llama3.2-vision:11b-instruct-q4_K_M": 600000,
-    "glm-ocr": 90000,
   }
   const timeout = timeouts[model] || 120000
 

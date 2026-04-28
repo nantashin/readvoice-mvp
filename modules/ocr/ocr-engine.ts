@@ -3,23 +3,6 @@ import path from "path"
 import os from "os"
 import { spawnSync } from "child_process"
 
-function buildPythonEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env }
-  env.PYTHONIOENCODING = "utf-8"
-
-  // Windows에서 ollama PATH 추가
-  if (process.platform === "win32") {
-    const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
-    if (env.PATH) {
-      env.PATH = `${ollamaPath};${env.PATH}`
-    } else {
-      env.PATH = ollamaPath
-    }
-  }
-
-  return env
-}
-
 function sanitizeOcrText(text: string): string {
   // ANSI 제어 문자 제거
   let clean = text.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\[K/g, "")
@@ -49,17 +32,29 @@ export async function extractTextOCR(
   try {
     fs.writeFileSync(tmpImage, buffer)
 
-    const PYTHON_BIN = process.env.PYTHON_BIN || "python"
+    const PYTHON_BIN = process.env.PYTHON_BIN ||
+      "C:\\Users\\tara0\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
     const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
 
+    const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
+    const env = {
+      ...process.env,
+      PATH: `${ollamaPath};${process.env.PATH}`,
+      PYTHONIOENCODING: "utf-8"
+    }
+
     console.log("[OCR] PYTHON_BIN:", PYTHON_BIN)
+    console.log("[OCR] Ollama PATH:", ollamaPath)
     console.log("[OCR] GLM-OCR Python 스크립트 실행...")
 
     const result = spawnSync(PYTHON_BIN, [scriptPath, tmpImage], {
-      timeout: 120000,
+      timeout: 90000,
       encoding: "utf8",
-      env: buildPythonEnv(),
+      env,
     })
+
+    console.log("[OCR] exit code:", result.status)
+    console.log("[OCR] stderr:", result.stderr?.slice(0, 200))
 
     if (fs.existsSync(tmpImage)) {
       fs.unlinkSync(tmpImage)

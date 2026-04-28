@@ -3,6 +3,7 @@ export class BGMManager {
   private intervalId: ReturnType<typeof setInterval> | null = null
   private announcementRate: number = 1.0
   private firstAnnouncementTimer: ReturnType<typeof setTimeout> | null = null
+  private pendingPlay: boolean = false
 
   private playlist = [
     "/sounds/One-step-for-a-better-me.mp3",
@@ -21,8 +22,18 @@ export class BGMManager {
     this.announcementRate = rate
     this.stop()
 
-    // BGM 즉시 시작
+    // BGM 즉시 시작 시도
     this.playBGM()
+
+    // 브라우저 autoplay 정책 우회: 첫 클릭 시 재생
+    if (typeof document !== "undefined") {
+      document.addEventListener("click", () => {
+        if (this.pendingPlay) {
+          this.playBGM()
+          this.pendingPlay = false
+        }
+      }, { once: true })
+    }
 
     // 첫 번째 안내는 30초 후
     this.firstAnnouncementTimer = setTimeout(() => {
@@ -41,8 +52,14 @@ export class BGMManager {
     this.audio = new Audio(src)
     this.audio.volume = 0.4
     this.audio.play()
-      .then(() => console.log("[BGM] 재생 성공"))
-      .catch(e => console.error("[BGM] 재생 실패:", e))
+      .then(() => {
+        console.log("[BGM] 재생 성공")
+        this.pendingPlay = false
+      })
+      .catch(e => {
+        console.error("[BGM] 재생 실패:", e)
+        this.pendingPlay = true
+      })
 
     this.audio.onended = () => {
       console.log("[BGM] 트랙 종료, 다음 트랙으로")

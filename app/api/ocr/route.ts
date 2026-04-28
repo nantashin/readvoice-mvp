@@ -38,8 +38,7 @@ export async function POST(req: NextRequest) {
       "gemma4:e2b",
       "gemma4:e4b",
       "llama3.2-vision:11b-instruct-q4_K_M",
-      "qwen3.5:9b",
-      "glm-ocr"
+      "qwen3.5:9b"
     ]
 
     console.log("[API] 받은 모델:", model)

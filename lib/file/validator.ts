@@ -5,7 +5,7 @@ export interface FileValidation {
   errorMessage?: string
 }
 
-const ACCEPT = "image/jpeg,image/png,image/webp,application/pdf"
+const ACCEPT = ".png,.jpg,.jpeg,.pdf"
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
 export function validateFile(file: File): FileValidation {

@@ -26,11 +26,6 @@ const ALL_MODELS = [
     id: "qwen3.5:9b",
     label: "4. Q3 (OCR Q3) — 텍스트/문서 최적 (1~2분)",
     tts: "큐쓰리. 텍스트와 문서 인식에 최적화되어 있으며 약 1분에서 2분 걸립니다."
-  },
-  {
-    id: "glm-ocr",
-    label: "5. 지엘엠 (GLM-OCR) — 문서 전용 (30~60초)",
-    tts: "지엘엠. 문서 텍스트 추출에 최적화되어 있으며 약 30초에서 1분 걸립니다."
   }
 ]
 
@@ -38,8 +33,7 @@ const MODEL_MENU_TTS = `모델을 선택하세요.
 일번. 구글 투지. 가장 빠릅니다.
 이번. 구글 포지. 빠르고 정확합니다.
 삼번. 라마비전. 가장 상세합니다.
-사번. 큐쓰리. 텍스트 전용입니다.
-오번. 지엘엠. 문서 전용입니다.`
+사번. 큐쓰리. 텍스트 전용입니다.`
 
 interface FileUploadProps {
   onResult: (text: string, original?: string) => void
@@ -63,8 +57,27 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
-  const [ocrMode, setOcrMode] = useState<"ocr" | "describe">("describe")
+  const [availableModels, setAvailableModels] = useState<string[]>([])
   const tts = useSpeechSynthesis()
+
+  // Ollama 모델 목록 자동 조회
+  useEffect(() => {
+    fetch("http://localhost:11434/api/tags")
+      .then(r => r.json())
+      .then(data => {
+        const models = data.models?.map((m: any) => m.name) || []
+        console.log("[모델] 설치된 모델:", models)
+        setAvailableModels(models)
+
+        // GLM-OCR 평가
+        if (models.includes("glm-ocr")) {
+          console.log("[모델] GLM-OCR 사용 가능")
+        } else {
+          console.log("[모델] GLM-OCR 미설치 - 목록에서 제외됨")
+        }
+      })
+      .catch(() => console.log("[모델] Ollama 연결 실패"))
+  }, [])
 
   // startAnalysis 이벤트 수신
   useEffect(() => {
@@ -77,14 +90,14 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
 
     window.addEventListener("startAnalysis", handleStartAnalysis as EventListener)
     return () => window.removeEventListener("startAnalysis", handleStartAnalysis as EventListener)
-  }, [ocrMode])
+  }, [])
 
   const processFile = async (file: File, modelId: string) => {
     setLoading(true)
     onStatusChange("processing")
 
     try {
-      const result = await analyzeFile(file, modelId as VisionModel, ocrMode)
+      const result = await analyzeFile(file, modelId as VisionModel, "describe")
 
       if (result.error) {
         setError(result.error)
@@ -248,13 +261,6 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     }
   }, [selectedModel])
 
-  // 모드 변경 시 자동 재분석
-  useEffect(() => {
-    if (uploadedFile && !loading && previewType === "image") {
-      processFile(uploadedFile, selectedModel)
-    }
-  }, [ocrMode])
-
   return (
     <div style={{ width: "100%", maxWidth: "600px" }}>
       {/* 모델 선택 드롭다운 */}
@@ -304,101 +310,6 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
           {ALL_MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
-
-      {/* 이미지 모드 토글 (이미지 파일일 때만 표시) */}
-      {previewType === "image" && (
-        <div style={{ marginBottom: "1rem" }}>
-          <p
-            style={{
-              color: "#0D9488",
-              fontWeight: 700,
-              fontSize: "0.9rem",
-              marginBottom: "0.5rem",
-              textAlign: "center",
-            }}
-          >
-            처리 모드:
-          </p>
-          <div
-            style={{
-              display: "flex",
-              gap: "0.5rem",
-              justifyContent: "center",
-            }}
-          >
-            <button
-              onClick={() => {
-                setOcrMode("ocr")
-                tts.speak("텍스트 읽기 모드로 변경되었습니다.")
-              }}
-              onKeyDown={(e) => {
-                if (e.code === "Space") {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }
-              }}
-              disabled={loading}
-              aria-label="텍스트 읽기 모드"
-              style={{
-                flex: 1,
-                padding: "0.75rem",
-                borderRadius: "0.5rem",
-                border: ocrMode === "ocr" ? "2px solid #0284C7" : "2px solid #E5E7EB",
-                background: ocrMode === "ocr" ? "#0284C7" : "white",
-                color: ocrMode === "ocr" ? "white" : "#1E3A5F",
-                fontSize: "0.9rem",
-                fontWeight: 600,
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.6 : 1,
-                transition: "all 0.2s",
-              }}
-            >
-              📖 텍스트 읽기
-            </button>
-            <button
-              onClick={() => {
-                setOcrMode("describe")
-                tts.speak("이미지 설명 모드로 변경되었습니다.")
-              }}
-              onKeyDown={(e) => {
-                if (e.code === "Space") {
-                  e.preventDefault()
-                  e.stopPropagation()
-                }
-              }}
-              disabled={loading}
-              aria-label="이미지 설명 모드"
-              style={{
-                flex: 1,
-                padding: "0.75rem",
-                borderRadius: "0.5rem",
-                border: ocrMode === "describe" ? "2px solid #0284C7" : "2px solid #E5E7EB",
-                background: ocrMode === "describe" ? "#0284C7" : "white",
-                color: ocrMode === "describe" ? "white" : "#1E3A5F",
-                fontSize: "0.9rem",
-                fontWeight: 600,
-                cursor: loading ? "not-allowed" : "pointer",
-                opacity: loading ? 0.6 : 1,
-                transition: "all 0.2s",
-              }}
-            >
-              🖼️ 이미지 설명
-            </button>
-          </div>
-          <p
-            style={{
-              color: "#64748B",
-              fontSize: "0.75rem",
-              marginTop: "0.5rem",
-              textAlign: "center",
-            }}
-          >
-            {ocrMode === "ocr"
-              ? "문서나 이미지의 텍스트를 그대로 추출합니다"
-              : "이미지의 내용을 상세히 설명합니다"}
-          </p>
-        </div>
-      )}
 
       {/* 기본 폴더 경로 안내 */}
       <p style={{ color: "#0D9488", fontSize: "0.85rem", marginBottom: "1rem", textAlign: "center" }}>

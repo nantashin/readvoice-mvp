@@ -3,7 +3,6 @@ export type VisionModel =
   | "gemma4:e4b"
   | "qwen3.5:9b"
   | "llama3.2-vision:11b-instruct-q4_K_M"
-  | "glm-ocr"
 
 export interface AnalysisResult {
   text: string
