@@ -26,8 +26,8 @@ const MAIN_MENU_TTS = `어떻게 도와드릴까요?
 스페이스바를 누르고 번호나 원하시는 걸 말씀해 주세요.`
 
 const IMAGE_MODEL_MENU_TTS = `어떤 모델로 설명해 드릴까요?
-일번. 구글 투지. 가장 빠릅니다.
-이번. 구글 포지. 빠르고 정확합니다.
+일번. 구글 이기가. 가장 빠릅니다.
+이번. 구글 사기가. 빠르고 정확합니다.
 삼번. 라마비전. 가장 상세합니다.
 스페이스바를 누르고 번호로 말씀해 주세요.`
 
@@ -35,12 +35,12 @@ const DOCUMENT_MODEL_MENU_TTS = `어떤 모델로 읽어 드릴까요?
 일번. 큐쓰리. 텍스트와 문서에 강합니다.
 이번. 올름오씨알. 표와 레이아웃에 강합니다.
 삼번. 지엘엠. 문서 특화 모델입니다.
-사번. 구글 포지. 빠르고 정확합니다.
+사번. 구글 사기가. 빠르고 정확합니다.
 스페이스바를 누르고 번호로 말씀해 주세요.`
 
 const MODEL_MENU_TTS = `어떤 모델로 분석해 드릴까요?
-일번. 구글 2G. 가장 빠르게 분석해드려요.
-이번. 구글 4G. 빠르면서 정확하게 분석해드려요.
+일번. 구글 이기가. 가장 빠르게 분석해드려요.
+이번. 구글 사기가. 빠르면서 정확하게 분석해드려요.
 삼번. 라마비전. 가장 꼼꼼하게 분석해드려요.
 사번. 큐쓰리. 텍스트 인식에 강해요.
 오번. 지엘엠. 문서 읽기에 특화되어 있어요.
@@ -462,12 +462,12 @@ export default function Home() {
       // fileType에 따라 다른 모델 매핑
       if (fileType === "image") {
         // 이미지 모델 (3개)
-        if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
+        if (/일번|1|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
           modelId = "gemma4:e2b"
-          modelName = "구글 투지"
-        } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
+          modelName = "구글 이기가"
+        } else if (/이번|2|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
-          modelName = "구글 포지"
+          modelName = "구글 사기가"
         } else if (/삼번|3|라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
@@ -483,21 +483,21 @@ export default function Home() {
         } else if (/삼번|3|지엘엠|glm/i.test(t)) {
           modelId = "glm-ocr"
           modelName = "지엘엠"
-        } else if (/사번|4|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
+        } else if (/사번|4|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
-          modelName = "구글 포지"
+          modelName = "구글 사기가"
         } else if (/오번|5|라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
         }
       } else {
         // fileType이 설정되지 않은 경우 (기존 로직 유지)
-        if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
+        if (/일번|1|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
           modelId = "gemma4:e2b"
-          modelName = "구글 투지"
-        } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
+          modelName = "구글 이기가"
+        } else if (/이번|2|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
-          modelName = "구글 포지"
+          modelName = "구글 사기가"
         } else if (/삼번|3|라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
@@ -747,8 +747,8 @@ export default function Home() {
 
       if (fileType === "image") {
         models = [
-          { id: "gemma4:e2b", name: "구글 투지" },
-          { id: "gemma4:e4b", name: "구글 포지" },
+          { id: "gemma4:e2b", name: "구글 이기가" },
+          { id: "gemma4:e4b", name: "구글 사기가" },
           { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" }
         ]
       } else if (fileType === "document") {
@@ -756,14 +756,14 @@ export default function Home() {
           { id: "qwen3.5:9b", name: "큐쓰리" },
           { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" },
           { id: "glm-ocr", name: "지엘엠" },
-          { id: "gemma4:e4b", name: "구글 포지" },
+          { id: "gemma4:e4b", name: "구글 사기가" },
           { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" }
         ]
       } else {
         // 기존 로직 (fileType 없는 경우)
         models = [
-          { id: "gemma4:e2b", name: "구글 투지" },
-          { id: "gemma4:e4b", name: "구글 포지" },
+          { id: "gemma4:e2b", name: "구글 이기가" },
+          { id: "gemma4:e4b", name: "구글 사기가" },
           { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
           { id: "qwen3.5:9b", name: "큐쓰리" },
           { id: "glm-ocr", name: "지엘엠" }
@@ -804,8 +804,8 @@ export default function Home() {
 
     if (type === "model") {
       const modelNames: Record<string, string> = {
-        "gemma4:e2b": "구글 투지",
-        "gemma4:e4b": "구글 포지",
+        "gemma4:e2b": "구글 이기가",
+        "gemma4:e4b": "구글 사기가",
         "llama3.2-vision:11b-instruct-q4_K_M": "라마비전",
         "qwen3.5:9b": "큐쓰리",
         "richardyoung/olmocr2:7b-q8": "올름오씨알",

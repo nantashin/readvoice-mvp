@@ -12,13 +12,13 @@ import { classifyImage } from "@/modules/ocr/gemini"
 export const IMAGE_MODELS = [
   {
     id: "gemma4:e2b",
-    label: "1. 구글 투지 (gemma4 E2B) — 빠른 분석 (5~20초)",
-    tts: "일번. 구글 투지. 가장 빠릅니다. 약 5초에서 20초 걸립니다."
+    label: "1. 구글 2G (gemma4 E2B) — 빠른 분석 (5~20초)",
+    tts: "일번. 구글 이기가. 가장 빠릅니다. 약 5초에서 20초 걸립니다."
   },
   {
     id: "gemma4:e4b",
-    label: "2. 구글 포지 (gemma4 E4B) — 균형 (20~40초)",
-    tts: "이번. 구글 포지. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    label: "2. 구글 4G (gemma4 E4B) — 균형 (20~40초)",
+    tts: "이번. 구글 사기가. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
@@ -46,8 +46,8 @@ export const DOCUMENT_MODELS = [
   },
   {
     id: "gemma4:e4b",
-    label: "4. 구글 포지 (gemma4 E4B) — 균형형 (20~40초)",
-    tts: "사번. 구글 포지. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    label: "4. 구글 4G (gemma4 E4B) — 균형형 (20~40초)",
+    tts: "사번. 구글 사기가. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
   }
 ]
 
@@ -180,10 +180,10 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         let eventType: "imageSelected" | "imageDocSelected" | "imageMixedSelected" = "imageSelected"
 
         if (classification === "document") {
-          message = "문서 이미지로 판단했어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천, 30초에서 1분. 이번, 올름오씨알, 레이아웃 특화, 1분에서 2분. 삼번, 지엘엠, 문서 전용, 30초에서 1분. 사번, 구글 포지, 범용, 30초에서 40초. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
+          message = "문서 이미지로 판단했어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천, 30초에서 1분. 이번, 올름오씨알, 레이아웃 특화, 1분에서 2분. 삼번, 지엘엠, 문서 전용, 30초에서 1분. 사번, 구글 사기가, 범용, 30초에서 40초. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
           eventType = "imageDocSelected"
         } else if (classification === "photo") {
-          message = "이미지로 판단했어요. 어떤 모델로 설명해드릴까요? 일번, 구글 투지, 가장 빠르게 15초에서 20초. 이번, 구글 포지, 균형 있게 30초에서 40초. 삼번, 라마비전, 가장 정밀하게 2분에서 3분. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
+          message = "이미지로 판단했어요. 어떤 모델로 설명해드릴까요? 일번, 구글 이기가, 가장 빠르게 15초에서 20초. 이번, 구글 사기가, 균형 있게 30초에서 40초. 삼번, 라마비전, 가장 정밀하게 2분에서 3분. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
           eventType = "imageSelected"
         } else {
           // mixed
