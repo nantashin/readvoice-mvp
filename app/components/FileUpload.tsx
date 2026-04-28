@@ -6,6 +6,7 @@ import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
 import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
 import { bgmManager } from "@/lib/audio/bgm-manager"
+import { classifyImage } from "@/modules/ocr/gemini"
 
 // 이미지 설명용 모델 (3개)
 export const IMAGE_MODELS = [
@@ -160,13 +161,51 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
 
     // 이미지 파일
     if (validation.isImage) {
-      console.log("[파일 업로드] 이미지 선택됨")
-      tts.speak("이미지가 업로드되었어요. 어떤 모델로 설명해드릴까요?")
+      console.log("[파일 업로드] 이미지 선택됨 - 자동 분류 시작")
+      setLoading(true)
+      onStatusChange("processing")
+      tts.speak("파일을 확인하고 있어요. 잠깐만 기다려 주세요.")
+      bgmManager.start()
 
-      // page.tsx로 imageSelected 이벤트 발송
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("imageSelected", { detail: { file } }))
-      }, 2000)
+      try {
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        const classification = await classifyImage(buffer, file.name)
+
+        console.log("[자동 분류] 결과:", classification)
+        bgmManager.stop()
+
+        // 분류 결과에 따라 다른 안내
+        let message = ""
+        let eventType: "imageSelected" | "imageDocSelected" | "imageMixedSelected" = "imageSelected"
+
+        if (classification === "document") {
+          message = "문서 이미지로 판단했어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천, 30초에서 1분. 이번, 올름오씨알, 레이아웃 특화, 1분에서 2분. 삼번, 지엘엠, 문서 전용, 30초에서 1분. 사번, 구글 포지, 범용, 30초에서 40초. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
+          eventType = "imageDocSelected"
+        } else if (classification === "photo") {
+          message = "이미지로 판단했어요. 어떤 모델로 설명해드릴까요? 일번, 구글 투지, 가장 빠르게 15초에서 20초. 이번, 구글 포지, 균형 있게 30초에서 40초. 삼번, 라마비전, 가장 정밀하게 2분에서 3분. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
+          eventType = "imageSelected"
+        } else {
+          // mixed
+          message = "그림과 글자가 함께 있어요. 그림 설명을 먼저 해드릴까요, 아니면 글자를 먼저 읽어드릴까요? 일번, 그림 설명 먼저. 이번, 글자 읽기 먼저. 스페이스바를 누르고 번호로 말씀해 주세요."
+          eventType = "imageMixedSelected"
+        }
+
+        tts.speak(message)
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent(eventType, { detail: { file, classification } }))
+        }, 1000)
+      } catch (e) {
+        console.error("[자동 분류] 실패:", e)
+        bgmManager.stop()
+        const msg = "자동 판단이 어려웠어요. 이미지인지 문서인지 말씀해 주세요."
+        tts.speak(msg)
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent("classifyFailed", { detail: { file } }))
+        }, 2000)
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
@@ -176,6 +215,7 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
       setLoading(true)
       onStatusChange("processing")
       tts.speak("PDF 파일을 확인하고 있어요. 잠깐만 기다려 주세요.")
+      bgmManager.start()
 
       try {
         const formData = new FormData()
@@ -188,6 +228,7 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         })
 
         const data = await res.json()
+        bgmManager.stop()
 
         if (res.ok && data.text) {
           // 텍스트 추출 성공 - 바로 읽기
@@ -198,18 +239,23 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
             onStatusChange("speaking")
           }, 1500)
         } else if (data.error === "scanned_pdf") {
-          // 스캔된 PDF - 모델 선택 필요
-          console.log("[PDF] 스캔된 문서 감지")
-          tts.speak("스캔된 문서예요. 어떤 모델로 읽어드릴까요?")
+          // 스캔된 PDF - 자동 전처리 후 모델 선택
+          console.log("[PDF] 스캔된 문서 감지 - 이미지 변환 중")
+          tts.speak("스캔된 문서예요. 이미지로 변환해서 읽을게요. 잠시만 기다려 주세요.")
 
-          // page.tsx로 pdfScannedSelected 이벤트 발송
+          const msg = "문서 준비가 됐어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천. 이번, 올름오씨알, 레이아웃 특화. 삼번, 지엘엠. 사번, 구글 포지. 오번, 라마비전, 가장 정밀하지만 3분 걸려요. 스페이스바를 누르고 번호로 말씀해 주세요."
+
           setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("pdfScannedSelected", { detail: { file } }))
+            tts.speak(msg)
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent("pdfScannedSelected", { detail: { file } }))
+            }, 1000)
           }, 2000)
         } else {
           throw new Error(data.error || "텍스트 추출 실패")
         }
       } catch (e) {
+        bgmManager.stop()
         const msg = e instanceof Error ? e.message : "PDF 처리 중 오류가 발생했습니다."
         console.error("[PDF]", e)
         setError(msg)

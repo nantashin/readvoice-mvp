@@ -130,48 +130,6 @@ export default function Home() {
     }
   }, [response])
 
-  // imageSelected 이벤트 수신
-  useEffect(() => {
-    const handleImageSelected = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("image")
-      setMenuState("model_select")
-      setMicState("speaking")
-
-      speak(IMAGE_MODEL_MENU_TTS)
-      const delay = (IMAGE_MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-      setTimeout(() => {
-        setMicState("off")
-        startListening()
-      }, delay)
-    }
-
-    window.addEventListener("imageSelected", handleImageSelected as EventListener)
-    return () => window.removeEventListener("imageSelected", handleImageSelected as EventListener)
-  }, [speechRate, startListening, speak])
-
-  // pdfScannedSelected 이벤트 수신
-  useEffect(() => {
-    const handlePdfScannedSelected = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("document")
-      setMenuState("model_select")
-      setMicState("speaking")
-
-      speak(DOCUMENT_MODEL_MENU_TTS)
-      const delay = (DOCUMENT_MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-      setTimeout(() => {
-        setMicState("off")
-        startListening()
-      }, delay)
-    }
-
-    window.addEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
-    return () => window.removeEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
-  }, [speechRate, startListening, speak])
-
   const speak = useCallback((text: string, rate?: number, pitch: number = 1.7) => {
     window.speechSynthesis.cancel()
     // TTS 전처리: 불릿/특수기호 제거, 마크다운 정리
@@ -195,6 +153,86 @@ export default function Home() {
     stt.stopListening()
     setMicState("off")
   }, [stt])
+
+  // imageSelected 이벤트 수신 (사진)
+  useEffect(() => {
+    const handleImageSelected = (event: CustomEvent<{ file: File }>) => {
+      const { file } = event.detail
+      setPendingFile(file)
+      setFileType("image")
+      setMenuState("model_select")
+      setMicState("off")
+
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("imageSelected", handleImageSelected as EventListener)
+    return () => window.removeEventListener("imageSelected", handleImageSelected as EventListener)
+  }, [startListening])
+
+  // imageDocSelected 이벤트 수신 (문서 이미지)
+  useEffect(() => {
+    const handleImageDocSelected = (event: CustomEvent<{ file: File }>) => {
+      const { file } = event.detail
+      setPendingFile(file)
+      setFileType("document")
+      setMenuState("model_select")
+      setMicState("off")
+
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("imageDocSelected", handleImageDocSelected as EventListener)
+    return () => window.removeEventListener("imageDocSelected", handleImageDocSelected as EventListener)
+  }, [startListening])
+
+  // imageMixedSelected 이벤트 수신 (혼합)
+  useEffect(() => {
+    const handleImageMixedSelected = (event: CustomEvent<{ file: File, classification: string }>) => {
+      const { file } = event.detail
+      setPendingFile(file)
+      setFileType("image") // 혼합은 일단 image로 처리
+      setMenuState("confirm") // 특수 모드: 그림 먼저 vs 글자 먼저
+      setMicState("off")
+
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("imageMixedSelected", handleImageMixedSelected as EventListener)
+    return () => window.removeEventListener("imageMixedSelected", handleImageMixedSelected as EventListener)
+  }, [startListening])
+
+  // classifyFailed 이벤트 수신
+  useEffect(() => {
+    const handleClassifyFailed = (event: CustomEvent<{ file: File }>) => {
+      const { file } = event.detail
+      setPendingFile(file)
+      setFileType(null)
+      setMenuState("model_select")
+      setMicState("off")
+
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("classifyFailed", handleClassifyFailed as EventListener)
+    return () => window.removeEventListener("classifyFailed", handleClassifyFailed as EventListener)
+  }, [startListening])
+
+  // pdfScannedSelected 이벤트 수신
+  useEffect(() => {
+    const handlePdfScannedSelected = (event: CustomEvent<{ file: File }>) => {
+      const { file } = event.detail
+      setPendingFile(file)
+      setFileType("document")
+      setMenuState("model_select")
+      setMicState("off")
+
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
+    return () => window.removeEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
+  }, [startListening])
 
   // 싱글탭: 현재 동작 중지 + 마이크 ON
   const handleSingleSpace = useCallback(() => {
@@ -435,7 +473,7 @@ export default function Home() {
           modelName = "라마비전"
         }
       } else if (fileType === "document") {
-        // 문서 모델 (4개)
+        // 문서 모델 (5개 - PDF 스캔본용)
         if (/일번|1|큐|qwen|q3|큐쓰리/i.test(t)) {
           modelId = "qwen3.5:9b"
           modelName = "큐쓰리"
@@ -448,6 +486,9 @@ export default function Home() {
         } else if (/사번|4|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
           modelName = "구글 포지"
+        } else if (/오번|5|라마|llama|비전/i.test(t)) {
+          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+          modelName = "라마비전"
         }
       } else {
         // fileType이 설정되지 않은 경우 (기존 로직 유지)
@@ -489,7 +530,7 @@ export default function Home() {
           startListening()
         }, delay)
       } else {
-        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "사번" : "오번"
+        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "오번" : "오번"
         speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`)
         const delay = (35 / 10) * 1000 / speechRate + 500
         setTimeout(() => {
@@ -715,7 +756,8 @@ export default function Home() {
           { id: "qwen3.5:9b", name: "큐쓰리" },
           { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" },
           { id: "glm-ocr", name: "지엘엠" },
-          { id: "gemma4:e4b", name: "구글 포지" }
+          { id: "gemma4:e4b", name: "구글 포지" },
+          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" }
         ]
       } else {
         // 기존 로직 (fileType 없는 경우)
@@ -766,6 +808,7 @@ export default function Home() {
         "gemma4:e4b": "구글 포지",
         "llama3.2-vision:11b-instruct-q4_K_M": "라마비전",
         "qwen3.5:9b": "큐쓰리",
+        "richardyoung/olmocr2:7b-q8": "올름오씨알",
         "glm-ocr": "지엘엠"
       }
 
