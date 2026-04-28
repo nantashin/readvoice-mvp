@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
-import { extractTextFromPDF, extractTextOnly } from "@/modules/ocr/pdf"
-import { extractTextFromImage } from "@/modules/ocr/gemini"
+import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+import { extractTextFromPDF } from "@/modules/ocr/pdf"
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,33 +32,13 @@ export async function POST(req: NextRequest) {
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
-    const model = (formData.get("model") as string) || "auto"
-
-    // 파일 타입 확인
-    const isPDF =
-      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
-
-    // PDF 텍스트만 추출 (모델 없이)
-    if (isPDF && model === "auto") {
-      console.log("[API] PDF 텍스트만 추출 시도")
-      const text = extractTextOnly(buffer, file.name)
-
-      if (text) {
-        console.log("[API] PDF 텍스트 추출 성공")
-        return NextResponse.json({ text })
-      } else {
-        console.log("[API] PDF 스캔본 감지 - Vision 모델 필요")
-        return NextResponse.json({ error: "scanned_pdf", message: "스캔된 PDF입니다. Vision 모델을 선택해주세요." }, { status: 422 })
-      }
-    }
+    const model = (formData.get("model") as string) || "glm-ocr"
 
     const validModels = [
       "gemma4:e2b",
       "gemma4:e4b",
       "llama3.2-vision:11b-instruct-q4_K_M",
-      "qwen3.5:9b",
-      "richardyoung/olmocr2:7b-q8",
-      "glm-ocr"
+      "qwen3.5:9b"
     ]
 
     console.log("[API] 받은 모델:", model)
@@ -71,16 +50,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
     }
 
+    // 파일 타입 확인
+    const isPDF =
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+
     if (isPDF) {
-      console.log("[API] PDF OCR 파이프라인 실행 (모델:", model, ")")
+      console.log("[API] PDF OCR 파이프라인 실행")
       const text = await extractTextFromPDF(buffer, file.name, model)
       return NextResponse.json({ text })
     } else {
-      // 이미지 파일은 Vision 모델로만 처리 (Tesseract 제외)
-      console.log("[API] 이미지 Vision 분석 (모델:", model, ")")
-      const result = await extractTextFromImage(buffer, file.type, file.name, model)
-      // extractTextFromImage는 { korean, english } 객체를 반환
-      return NextResponse.json({ text: result.korean, original: result.english })
+      console.log("[API] 이미지 Vision 분석")
+      const result = await extractText(buffer, file.type, file.name, model as any)
+      // extractText는 이미지일 경우 { korean, english } 객체를 반환
+      if (typeof result === "string") {
+        return NextResponse.json({ text: result })
+      } else {
+        return NextResponse.json({ text: result.korean, original: result.english })
+      }
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."

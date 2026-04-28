@@ -36,6 +36,32 @@ function extractRawText(buffer: Buffer): string {
   return texts
 }
 
+/**
+ * PDF에서 텍스트만 추출 (Vision 모델 사용 안 함)
+ * 성공하면 텍스트 반환, 실패하면 null 반환
+ */
+export function extractTextOnly(buffer: Buffer, fileName?: string): string | null {
+  const name = fileName || "문서"
+
+  try {
+    console.log("[PDF] 텍스트만 추출 시도...")
+    const rawText = extractRawText(buffer)
+    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+
+    if (koreanCount > 10) {
+      console.log(`[PDF] 텍스트 추출 성공: 한글 ${koreanCount}자`)
+      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
+    }
+
+    console.log(`[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자)`)
+    return null
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.error("[PDF] 텍스트 추출 실패:", message)
+    return null
+  }
+}
+
 export async function extractTextFromPDF(
   buffer: Buffer,
   fileName?: string,

@@ -1,7 +1,7 @@
 {
   "version": "v2.5.0",
-  "date": "2026-04-28_14-27",
+  "date": "2026-04-28_15-20",
   "phase": "Phase 2",
-  "message": "단순화 파이프라인, 2MB 압축, BGM 수정, PaddleOCR 도입",
+  "message": "TTS 전처리 시스템 완성, 라마비전 복구",
   "gitTag": "v2.5.0"
 }

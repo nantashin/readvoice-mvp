@@ -15,7 +15,7 @@ const NEEDS_TRANSLATION_MODELS = [
   "llama3.2-vision:11b-instruct-q4_K_M"
 ]
 
-// 통합 프롬프트 (gemma4, qwen3.5용)
+// 통합 프롬프트 (gemma4:e2b, qwen3.5용)
 const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 
 1. 이미지 속 텍스트: 보이는 모든 글자, 숫자, 기호
@@ -25,6 +25,27 @@ const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 5. 전체적인 색감과 분위기
 
 반드시 한국어로만 답해줘. 영어 금지.`
+
+// gemma4:e4b 전용 프롬프트 (Claude Vision 스타일)
+const GEMMA4_E4B_PROMPT = `이 이미지를 보고 아래 순서대로 한국어로 상세히 설명해줘.
+영어는 절대 사용하지 마. 모든 내용을 자연스러운 한국어로만 써줘.
+
+1. 텍스트: 이미지 안에 보이는 모든 글자, 숫자, 기호를 위에서 아래로 그대로 읽어줘
+2. 주요 인물: 인물이 있다면 외모, 의상, 자세, 표정을 구체적으로 설명해줘
+3. 사물과 배경: 주요 사물, 배경, 장소를 설명해줘
+4. 색상과 분위기: 전체적인 색감과 분위기를 설명해줘
+5. 한 줄 요약: 이 이미지가 무엇인지 한 문장으로 요약해줘
+
+규칙:
+- 영어 단어 절대 금지 (고유명사도 한국어 발음으로)
+- 추측하지 말고 보이는 것만 설명해
+- 각 항목은 반드시 포함해줘`
+
+// 이미지 분류용 프롬프트 (빠른 판단)
+const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로만 답해줘:
+문서 (텍스트가 주인 공문서, 양식, 계약서, 통지서),
+사진 (인물사진, 풍경, 일러스트, 그림, 카드),
+혼합 (문서인데 그림도 있음)`
 
 // llama3.2-vision 전용 프롬프트 (매우 상세한 영문 분석 → 번역)
 const LLAMA_PROMPT = `Analyze this image completely.
@@ -214,6 +235,83 @@ ${englishText}`,
   return `파일명: ${fileName}\n\n설명:\n${englishText}`
 }
 
+/**
+ * 이미지 자동 분류 (문서/사진/혼합)
+ */
+export async function classifyImage(
+  buffer: Buffer,
+  fileName: string
+): Promise<"document" | "photo" | "mixed"> {
+  // STEP 1: 파일명으로 1차 판단
+  const lowerName = fileName.toLowerCase()
+
+  const documentKeywords = [
+    "통지서", "증명서", "신청서", "등록증", "계약서", "영수증",
+    "공문", "신청", "확인서", "invoice", "receipt", "certificate",
+    "contract", "document", "명세서", "진단서", "처방전", "청구서"
+  ]
+
+  const photoKeywords = [
+    "타로", "카드", "사진", "포스터", "그림", "일러스트",
+    "photo", "picture", "illustration", "artwork", "drawing"
+  ]
+
+  if (documentKeywords.some(kw => lowerName.includes(kw))) {
+    console.log("[분류] 파일명 기반: 문서")
+    return "document"
+  }
+
+  if (photoKeywords.some(kw => lowerName.includes(kw))) {
+    console.log("[분류] 파일명 기반: 사진")
+    return "photo"
+  }
+
+  // STEP 2: gemma4:e2b로 빠른 분류 (5초 이내)
+  try {
+    console.log("[분류] gemma4:e2b로 이미지 내용 분석 중...")
+    const base64 = buffer.toString("base64")
+
+    const res = await fetch("http://localhost:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gemma4:e2b",
+        messages: [
+          {
+            role: "user",
+            content: CLASSIFY_PROMPT,
+            images: [base64],
+          },
+        ],
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000), // 15초 타임아웃
+    })
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    const data = await res.json()
+    const result = data.message?.content?.trim().toLowerCase() || ""
+
+    console.log("[분류] AI 분석 결과:", result)
+
+    if (result.includes("문서") || result.includes("document")) {
+      return "document"
+    } else if (result.includes("사진") || result.includes("photo")) {
+      return "photo"
+    } else if (result.includes("혼합") || result.includes("mixed")) {
+      return "mixed"
+    }
+
+    // 기본값: 사진으로 처리
+    return "photo"
+  } catch (e) {
+    console.error("[분류] AI 분석 실패:", e)
+    // 실패 시 기본값: 사진
+    return "photo"
+  }
+}
+
 export async function extractTextFromImage(
   buffer: Buffer,
   mimeType: string,
@@ -226,9 +324,17 @@ export async function extractTextFromImage(
 
   const isKoreanNative = KOREAN_NATIVE_MODELS.includes(model)
   const isLlama = model === "llama3.2-vision:11b-instruct-q4_K_M"
-  const prompt = isKoreanNative ? UNIFIED_PROMPT : (isLlama ? LLAMA_PROMPT : UNIFIED_PROMPT)
+  const isGemma4E4B = model === "gemma4:e4b"
 
-  console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}, 라마: ${isLlama}`)
+  // 프롬프트 선택
+  let prompt = UNIFIED_PROMPT
+  if (isLlama) {
+    prompt = LLAMA_PROMPT
+  } else if (isGemma4E4B) {
+    prompt = GEMMA4_E4B_PROMPT
+  }
+
+  console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}, 라마: ${isLlama}, E4B: ${isGemma4E4B}`)
 
   // Ollama health check
   try {

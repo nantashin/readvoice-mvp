@@ -1,7 +1,8 @@
 function cleanDisplay(text: string): string {
   return text
     .replace(/#{1,6}\s*/g, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
+    // 볼드 처리: **텍스트** → <strong>텍스트</strong>
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "$1")
     .replace(/`{1,3}[^`]*`{1,3}/g, "")
     .replace(/\[(.+?)\]\(.+?\)/g, "$1")
@@ -20,6 +21,8 @@ interface ResponseDisplayProps {
 export default function ResponseDisplay({ response, status, onStop }: ResponseDisplayProps) {
   if (!response) return null
 
+  const displayText = cleanDisplay(response)
+
   return (
     <div
       aria-live="polite"
@@ -32,7 +35,7 @@ export default function ResponseDisplay({ response, status, onStop }: ResponseDi
         boxShadow: "0 4px 20px rgba(0,0,0,0.08)",
       }}
     >
-      <p
+      <div
         style={{
           color: "#1E3A5F",
           fontSize: "1.125rem",
@@ -40,9 +43,8 @@ export default function ResponseDisplay({ response, status, onStop }: ResponseDi
           whiteSpace: "pre-wrap",
           margin: 0,
         }}
-      >
-        {cleanDisplay(response)}
-      </p>
+        dangerouslySetInnerHTML={{ __html: displayText }}
+      />
       {status === "speaking" && (
         <button
           onClick={onStop}

@@ -5,53 +5,37 @@ import { validateFile, ACCEPT } from "@/lib/file/validator"
 import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
 import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
+import { classifyImage } from "@/modules/ocr/gemini"
 import { bgmManager } from "@/lib/audio/bgm-manager"
 
-// 이미지 설명용 모델 (3개)
-export const IMAGE_MODELS = [
+const ALL_MODELS = [
   {
     id: "gemma4:e2b",
-    label: "1. 구글 투지 (gemma4 E2B) — 빠른 분석 (5~20초)",
-    tts: "일번. 구글 투지. 가장 빠릅니다. 약 5초에서 20초 걸립니다."
+    label: "1. 구글 2G (gemma4 E2B) — 빠른 분석 (5~20초)",
+    tts: "구글 투지. 빠른 분석에 적합하며 약 5초에서 20초 걸립니다."
   },
   {
     id: "gemma4:e4b",
-    label: "2. 구글 포지 (gemma4 E4B) — 균형 (20~40초)",
-    tts: "이번. 구글 포지. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    label: "2. 구글 4G (gemma4 E4B) — 균형 (20~40초)",
+    tts: "구글 포지. 빠르고 정확한 분석을 제공하며 약 20초에서 40초 걸립니다."
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
     label: "3. 라마비전 (Llama Vision) — 상세 묘사 (2~3분)",
-    tts: "삼번. 라마비전. 가장 상세합니다. 약 2분에서 3분 걸립니다."
-  }
-]
-
-// 문서 OCR용 모델 (4개)
-export const DOCUMENT_MODELS = [
+    tts: "라마비전. 배경과 분위기까지 가장 상세하게 묘사하며 약 2분에서 3분 걸립니다."
+  },
   {
     id: "qwen3.5:9b",
-    label: "1. 큐쓰리 (qwen3.5:9b) — 텍스트/문서 최적 (1~2분)",
-    tts: "일번. 큐쓰리. 텍스트와 문서 인식에 최적화되어 있습니다. 약 1분에서 2분 걸립니다."
-  },
-  {
-    id: "richardyoung/olmocr2:7b-q8",
-    label: "2. 올름오씨알 (olmOCR2) — 표/레이아웃 인식 (2분)",
-    tts: "이번. 올름오씨알. 표와 복잡한 레이아웃 읽기에 강합니다. 약 2분 걸립니다."
-  },
-  {
-    id: "glm-ocr",
-    label: "3. 지엘엠 (GLM-OCR) — 문서 특화 (1~2분)",
-    tts: "삼번. 지엘엠. 문서 읽기에 특화되어 있습니다. 약 1분에서 2분 걸립니다."
-  },
-  {
-    id: "gemma4:e4b",
-    label: "4. 구글 포지 (gemma4 E4B) — 균형형 (20~40초)",
-    tts: "사번. 구글 포지. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    label: "4. Q3 (OCR Q3) — 텍스트/문서 최적 (1~2분)",
+    tts: "큐쓰리. 텍스트와 문서 인식에 최적화되어 있으며 약 1분에서 2분 걸립니다."
   }
 ]
 
-// 전체 모델 (UI 드롭다운용)
-const ALL_MODELS = [...IMAGE_MODELS, ...DOCUMENT_MODELS.filter(m => m.id !== "gemma4:e4b")]
+const MODEL_MENU_TTS = `모델을 선택하세요.
+일번. 구글 투지. 가장 빠릅니다.
+이번. 구글 포지. 빠르고 정확합니다.
+삼번. 라마비전. 가장 상세합니다.
+사번. 큐쓰리. 텍스트 전용입니다.`
 
 interface FileUploadProps {
   onResult: (text: string, original?: string) => void
@@ -59,13 +43,18 @@ interface FileUploadProps {
   selectedModel: string
   onModelChange: (modelId: string) => void
   onFileSelected: (file: File) => void
+  onClassificationChange?: (mode: "document" | "photo" | "mixed" | null) => void
 }
 
-export default function FileUpload({ onResult, onStatusChange, selectedModel, onModelChange, onFileSelected }: FileUploadProps) {
+type ClassifyState = "idle" | "classifying" | "waiting" | "confirmed" | "analyzing"
+
+export default function FileUpload({ onResult, onStatusChange, selectedModel, onModelChange, onFileSelected, onClassificationChange }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const recognitionRef = useRef<any>(null)
   const modelSelectionTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null)
   const [fileName, setFileName] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
@@ -75,6 +64,9 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [classifyState, setClassifyState] = useState<ClassifyState>("idle")
+  const [fileMode, setFileMode] = useState<"document" | "photo" | "mixed" | null>(null)
+  const [countdown, setCountdown] = useState(3)
   const tts = useSpeechSynthesis()
 
   // Ollama 모델 목록 자동 조회
@@ -158,68 +150,163 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     setPreviewType(preview.type)
     setUploadedFile(file)
 
-    // 이미지 파일
+    // 이미지 파일인 경우 자동 분류 시작
     if (validation.isImage) {
-      console.log("[파일 업로드] 이미지 선택됨")
-      tts.speak("이미지가 업로드되었어요. 어떤 모델로 설명해드릴까요?")
-
-      // page.tsx로 imageSelected 이벤트 발송
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent("imageSelected", { detail: { file } }))
-      }, 2000)
-      return
-    }
-
-    // PDF 파일
-    if (validation.isPDF) {
-      console.log("[파일 업로드] PDF 선택됨 - 텍스트 추출 시도")
-      setLoading(true)
-      onStatusChange("processing")
-      tts.speak("PDF 파일을 확인하고 있어요. 잠깐만 기다려 주세요.")
+      // STEP 1: TTS 안내 + BGM 시작
+      setClassifyState("classifying")
+      tts.speak("파일을 확인하고 있어요. 잠깐만 기다려 주세요.")
+      bgmManager.start()
 
       try {
-        const formData = new FormData()
-        formData.append("file", file)
-        formData.append("model", "auto") // 텍스트만 추출
+        // STEP 2: classifyImage 실행
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = Buffer.from(arrayBuffer)
+        const classification = await classifyImage(buffer, file.name)
 
-        const res = await fetch("/api/ocr", {
-          method: "POST",
-          body: formData,
-        })
-
-        const data = await res.json()
-
-        if (res.ok && data.text) {
-          // 텍스트 추출 성공 - 바로 읽기
-          console.log("[PDF] 텍스트 추출 성공")
-          tts.speak("문서를 읽어드릴게요.")
-          setTimeout(() => {
-            onResult(data.text)
-            onStatusChange("speaking")
-          }, 1500)
-        } else if (data.error === "scanned_pdf") {
-          // 스캔된 PDF - 모델 선택 필요
-          console.log("[PDF] 스캔된 문서 감지")
-          tts.speak("스캔된 문서예요. 어떤 모델로 읽어드릴까요?")
-
-          // page.tsx로 pdfScannedSelected 이벤트 발송
-          setTimeout(() => {
-            window.dispatchEvent(new CustomEvent("pdfScannedSelected", { detail: { file } }))
-          }, 2000)
-        } else {
-          throw new Error(data.error || "텍스트 추출 실패")
+        console.log("[자동 분류] 결과:", classification)
+        setFileMode(classification)
+        if (onClassificationChange) {
+          onClassificationChange(classification)
         }
+
+        // STEP 3: 분류 결과에 따라 TTS 안내
+        let message = ""
+        if (classification === "document") {
+          message = "문서로 판단했어요. 글자를 읽어드릴게요. 다르면 지금 스페이스바를 눌러 말씀해 주세요."
+        } else if (classification === "photo") {
+          message = "이미지로 판단했어요. 그림을 설명해드릴게요. 다르면 지금 스페이스바를 눌러 말씀해 주세요."
+        } else {
+          message = "그림과 글자가 함께 있어요. 그림 설명 후 글자도 읽어드릴게요. 다르면 지금 스페이스바를 눌러 말씀해 주세요."
+        }
+
+        setClassifyState("waiting")
+        tts.speak(message)
+
+        // STEP 4: 3초 카운트다운
+        setCountdown(3)
+        startCountdown(file, classification)
+
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "PDF 처리 중 오류가 발생했습니다."
-        console.error("[PDF]", e)
-        setError(msg)
-        tts.speak(msg)
-      } finally {
-        setLoading(false)
+        console.error("[자동 분류] 실패:", e)
+        setClassifyState("idle")
+        setFileMode("photo") // 기본값: photo
+        tts.speak("자동 분류에 실패했어요. 기본 이미지 모드로 진행할게요.")
+
+        // 3초 후 자동 실행
+        setTimeout(() => {
+          executeAnalysis(file, "photo")
+        }, 3000)
       }
+    } else {
+      // PDF 파일은 바로 전달
+      onFileSelected(file)
     }
   }
 
+  const startCountdown = (file: File, classification: "document" | "photo" | "mixed") => {
+    let count = 3
+
+    const timer = setInterval(() => {
+      count--
+      setCountdown(count)
+
+      if (count <= 0) {
+        clearInterval(timer)
+        // STEP 5: 3초 지나면 자동 실행
+        setClassifyState("confirmed")
+        executeAnalysis(file, classification)
+      }
+    }, 1000)
+
+    countdownTimerRef.current = timer
+  }
+
+  const executeAnalysis = async (file: File, mode: "document" | "photo" | "mixed") => {
+    setClassifyState("analyzing")
+    setLoading(true)
+    onStatusChange("processing")
+    bgmManager.stop()
+
+    try {
+      if (mode === "document") {
+        // GLM-OCR 실행
+        const result = await analyzeFile(file, "glm-ocr" as VisionModel, "ocr")
+        if (result.error) {
+          setError(result.error)
+          onResult(`오류: ${result.error}`)
+        } else {
+          onResult(result.text, result.original)
+        }
+      } else if (mode === "photo") {
+        // gemma4:e4b Vision 묘사
+        const result = await analyzeFile(file, "gemma4:e4b", "describe")
+        if (result.error) {
+          setError(result.error)
+          onResult(`오류: ${result.error}`)
+        } else {
+          onResult(result.text, result.original)
+        }
+      } else {
+        // mixed: Vision 먼저, 그 다음 OCR
+        const visionResult = await analyzeFile(file, "gemma4:e4b", "describe")
+        if (!visionResult.error) {
+          onResult(visionResult.text, visionResult.original)
+
+          // 잠시 대기 후 OCR 실행
+          tts.speak("이제 글자를 읽어드릴게요.")
+          setTimeout(async () => {
+            const ocrResult = await analyzeFile(file, "glm-ocr" as VisionModel, "ocr")
+            if (!ocrResult.error) {
+              onResult(ocrResult.text)
+            }
+          }, 2000)
+        } else {
+          setError(visionResult.error)
+          onResult(`오류: ${visionResult.error}`)
+        }
+      }
+
+      onStatusChange("speaking")
+    } catch (e) {
+      const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
+      setError(msg)
+      onResult(`오류: ${msg}`)
+      onStatusChange("speaking")
+    } finally {
+      setLoading(false)
+      setClassifyState("idle")
+      setFileMode(null)
+      if (inputRef.current) {
+        inputRef.current.value = ""
+      }
+      setFileName("")
+    }
+  }
+
+  // 사용자가 모드 변경한 경우
+  const changeMode = (newMode: "document" | "photo" | "mixed") => {
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current)
+      countdownTimerRef.current = null
+    }
+
+    setFileMode(newMode)
+    setClassifyState("confirmed")
+
+    if (uploadedFile) {
+      executeAnalysis(uploadedFile, newMode)
+    }
+  }
+
+  // userModeChange 이벤트 수신 (page.tsx에서 발송)
+  useEffect(() => {
+    const handleUserModeChange = (event: CustomEvent<{ mode: "document" | "photo" | "mixed" }>) => {
+      changeMode(event.detail.mode)
+    }
+
+    window.addEventListener("userModeChange", handleUserModeChange as EventListener)
+    return () => window.removeEventListener("userModeChange", handleUserModeChange as EventListener)
+  }, [uploadedFile])
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -319,6 +406,9 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
       }
       if (modelSelectionTimerRef.current) {
         clearTimeout(modelSelectionTimerRef.current)
+      }
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current)
       }
     }
   }, [cameraStream, previewUrl])

@@ -8,15 +8,45 @@ export interface AnalysisResult {
   text: string
   original?: string
   error?: string
+  classification?: "document" | "photo" | "mixed"
 }
+
+import { compressImage } from "@/lib/file/compressor"
+import { classifyImage } from "@/modules/ocr/gemini"
 
 export async function analyzeFile(
   file: File,
   model: VisionModel,
-  mode?: "ocr" | "describe"
+  mode?: "ocr" | "describe",
+  autoClassify: boolean = false
 ): Promise<AnalysisResult> {
+  let classification: "document" | "photo" | "mixed" | undefined
+
+  // 이미지 파일인 경우 자동 분류
+  const isImage = file.type.startsWith("image/")
+  if (isImage && autoClassify) {
+    try {
+      const arrayBuffer = await file.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      classification = await classifyImage(buffer, file.name)
+      console.log("[Analyzer] 자동 분류 결과:", classification)
+    } catch (e) {
+      console.error("[Analyzer] 자동 분류 실패:", e)
+    }
+  }
+
   const formData = new FormData()
-  formData.append("file", file)
+
+  // 이미지 파일인 경우 압축 (라마비전: 800KB, 나머지: 2MB)
+  if (isImage) {
+    console.log("[Analyzer] 이미지 압축 중... 모델:", model)
+    const base64 = await compressImage(file, model)
+    const compressedBlob = await (await fetch(`data:image/jpeg;base64,${base64}`)).blob()
+    formData.append("file", new File([compressedBlob], file.name, { type: "image/jpeg" }))
+  } else {
+    formData.append("file", file)
+  }
+
   formData.append("model", model)
   if (mode) {
     formData.append("mode", mode)
@@ -30,17 +60,20 @@ export async function analyzeFile(
       return {
         text: "",
         error: data.error ?? "파일 처리 중 오류가 발생했습니다.",
+        classification,
       }
     }
 
     return {
       text: data.text,
       original: data.original, // 이미지 분석일 경우 영문 원본
+      classification,
     }
   } catch {
     return {
       text: "",
       error: "네트워크 오류가 발생했습니다. 다시 시도해주세요.",
+      classification,
     }
   }
 }

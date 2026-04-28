@@ -3,14 +3,13 @@ import { useState, useEffect, useCallback, useRef } from "react"
 import { useSpeechRecognition } from "@/lib/speech/stt"
 import { useSpeechSynthesis, cleanForTTS } from "@/lib/speech/tts"
 import { parseSpeedCommand, saveSpeechRate, loadSpeechRate } from "@/lib/speech/speed-control"
-import FileUpload, { IMAGE_MODELS, DOCUMENT_MODELS } from "@/app/components/FileUpload"
+import FileUpload from "@/app/components/FileUpload"
 import MicButton from "@/app/components/MicButton"
 import ResponseDisplay from "@/app/components/ResponseDisplay"
 import { bgmManager } from "@/lib/audio/bgm-manager"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
 type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "ask_original"
-type FileType = "image" | "document" | null
 
 const INTRO_TTS = `안녕하세요! READ VOICE Pro예요.
 스페이스바를 누르고 말씀해 주시면 바로 도와드릴게요.
@@ -24,19 +23,6 @@ const MAIN_MENU_TTS = `어떻게 도와드릴까요?
 사번. 분석 모델을 바꿔드릴게요.
 오번. 처음으로 돌아가요.
 스페이스바를 누르고 번호나 원하시는 걸 말씀해 주세요.`
-
-const IMAGE_MODEL_MENU_TTS = `어떤 모델로 설명해 드릴까요?
-일번. 구글 투지. 가장 빠릅니다.
-이번. 구글 포지. 빠르고 정확합니다.
-삼번. 라마비전. 가장 상세합니다.
-스페이스바를 누르고 번호로 말씀해 주세요.`
-
-const DOCUMENT_MODEL_MENU_TTS = `어떤 모델로 읽어 드릴까요?
-일번. 큐쓰리. 텍스트와 문서에 강합니다.
-이번. 올름오씨알. 표와 레이아웃에 강합니다.
-삼번. 지엘엠. 문서 특화 모델입니다.
-사번. 구글 포지. 빠르고 정확합니다.
-스페이스바를 누르고 번호로 말씀해 주세요.`
 
 const MODEL_MENU_TTS = `어떤 모델로 분석해 드릴까요?
 일번. 구글 2G. 가장 빠르게 분석해드려요.
@@ -71,7 +57,7 @@ export default function Home() {
   const [originalText, setOriginalText] = useState<string>("")
   const [lastResponse, setLastResponse] = useState<string>("")
   const [previousMenuState, setPreviousMenuState] = useState<MenuState>("idle")
-  const [fileType, setFileType] = useState<FileType>(null)
+  const [fileClassification, setFileClassification] = useState<"document" | "photo" | "mixed" | null>(null)
 
   const micStateRef = useRef<MicState>("off")
   const menuStateRef = useRef<MenuState>("idle")
@@ -129,48 +115,6 @@ export default function Home() {
       setLastResponse(response)
     }
   }, [response])
-
-  // imageSelected 이벤트 수신
-  useEffect(() => {
-    const handleImageSelected = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("image")
-      setMenuState("model_select")
-      setMicState("speaking")
-
-      speak(IMAGE_MODEL_MENU_TTS)
-      const delay = (IMAGE_MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-      setTimeout(() => {
-        setMicState("off")
-        startListening()
-      }, delay)
-    }
-
-    window.addEventListener("imageSelected", handleImageSelected as EventListener)
-    return () => window.removeEventListener("imageSelected", handleImageSelected as EventListener)
-  }, [speechRate, startListening, speak])
-
-  // pdfScannedSelected 이벤트 수신
-  useEffect(() => {
-    const handlePdfScannedSelected = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("document")
-      setMenuState("model_select")
-      setMicState("speaking")
-
-      speak(DOCUMENT_MODEL_MENU_TTS)
-      const delay = (DOCUMENT_MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-      setTimeout(() => {
-        setMicState("off")
-        startListening()
-      }, delay)
-    }
-
-    window.addEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
-    return () => window.removeEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
-  }, [speechRate, startListening, speak])
 
   const speak = useCallback((text: string, rate?: number, pitch: number = 1.7) => {
     window.speechSynthesis.cancel()
@@ -392,6 +336,39 @@ export default function Home() {
       return
     }
 
+    // 파일 모드 변경 (자동 분류 대기 중)
+    if (/그림|사진|이미지|그림으로|사진으로/.test(t)) {
+      const event = new CustomEvent("userModeChange", { detail: { mode: "photo" } })
+      window.dispatchEvent(event)
+      setMicState("speaking")
+      speak("네, 그림으로 설명해드릴게요.")
+      setTimeout(() => setMicState("off"), 1500)
+      return
+    }
+
+    if (/글자|문서|텍스트|읽어|문서로|글자 읽기/.test(t)) {
+      const event = new CustomEvent("userModeChange", { detail: { mode: "document" } })
+      window.dispatchEvent(event)
+      setMicState("speaking")
+      speak("네, 글자를 읽어드릴게요.")
+      setTimeout(() => setMicState("off"), 1500)
+      return
+    }
+
+    if (/혼합|둘 다|둘다|그림이랑 글자|그림하고 글자/.test(t)) {
+      const event = new CustomEvent("userModeChange", { detail: { mode: "mixed" } })
+      window.dispatchEvent(event)
+      setMicState("speaking")
+      speak("네, 그림 설명과 글자 읽기 둘 다 해드릴게요.")
+      setTimeout(() => setMicState("off"), 2000)
+      return
+    }
+
+    if (/맞아|그래|응|계속|진행/.test(t)) {
+      // 현재 분류 결과 그대로 진행 (아무 동작 안 함, 카운트다운 계속)
+      setMicState("off")
+      return
+    }
 
     // === 기존 명령어 처리 ===
 
@@ -421,52 +398,21 @@ export default function Home() {
       let modelId = ""
       let modelName = ""
 
-      // fileType에 따라 다른 모델 매핑
-      if (fileType === "image") {
-        // 이미지 모델 (3개)
-        if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 투지"
-        } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 포지"
-        } else if (/삼번|3|라마|llama|비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        }
-      } else if (fileType === "document") {
-        // 문서 모델 (4개)
-        if (/일번|1|큐|qwen|q3|큐쓰리/i.test(t)) {
-          modelId = "qwen3.5:9b"
-          modelName = "큐쓰리"
-        } else if (/이번|2|올름|olmocr|올름오씨알/i.test(t)) {
-          modelId = "richardyoung/olmocr2:7b-q8"
-          modelName = "올름오씨알"
-        } else if (/삼번|3|지엘엠|glm/i.test(t)) {
-          modelId = "glm-ocr"
-          modelName = "지엘엠"
-        } else if (/사번|4|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 포지"
-        }
-      } else {
-        // fileType이 설정되지 않은 경우 (기존 로직 유지)
-        if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 투지"
-        } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 포지"
-        } else if (/삼번|3|라마|llama|비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        } else if (/사번|4|큐|qwen|q3/i.test(t)) {
-          modelId = "qwen3.5:9b"
-          modelName = "큐쓰리"
-        } else if (/오번|5|지엘엠|glm/i.test(t)) {
-          modelId = "glm-ocr"
-          modelName = "지엘엠"
-        }
+      if (/일번|1|구글.?투지|구글.?2|gemma.*e2b/i.test(t)) {
+        modelId = "gemma4:e2b"
+        modelName = "구글 투지"
+      } else if (/이번|2|구글.?포지|구글.?4|gemma.*e4b/i.test(t)) {
+        modelId = "gemma4:e4b"
+        modelName = "구글 포지"
+      } else if (/삼번|3|라마|llama|비전/i.test(t)) {
+        modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+        modelName = "라마비전"
+      } else if (/사번|4|큐|qwen|q3/i.test(t)) {
+        modelId = "qwen3.5:9b"
+        modelName = "큐쓰리"
+      } else if (/오번|5|지엘엠|glm/i.test(t)) {
+        modelId = "glm-ocr"
+        modelName = "지엘엠"
       }
 
       if (modelId) {
@@ -489,8 +435,7 @@ export default function Home() {
           startListening()
         }, delay)
       } else {
-        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "사번" : "오번"
-        speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`)
+        speak("죄송해요, 잘 못 들었어요. 일번부터 오번 중에 번호로 말씀해 주세요.")
         const delay = (35 / 10) * 1000 / speechRate + 500
         setTimeout(() => {
           setMicState("off")
@@ -702,33 +647,15 @@ export default function Home() {
           break
       }
     } else if (menuStateRef.current === "model_select") {
-      let models: Array<{ id: string; name: string }> = []
+      const models = [
+        { id: "gemma4:e2b", name: "구글 투지" },
+        { id: "gemma4:e4b", name: "구글 포지" },
+        { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
+        { id: "qwen3.5:9b", name: "큐쓰리" },
+        { id: "glm-ocr", name: "지엘엠" }
+      ]
 
-      if (fileType === "image") {
-        models = [
-          { id: "gemma4:e2b", name: "구글 투지" },
-          { id: "gemma4:e4b", name: "구글 포지" },
-          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" }
-        ]
-      } else if (fileType === "document") {
-        models = [
-          { id: "qwen3.5:9b", name: "큐쓰리" },
-          { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" },
-          { id: "glm-ocr", name: "지엘엠" },
-          { id: "gemma4:e4b", name: "구글 포지" }
-        ]
-      } else {
-        // 기존 로직 (fileType 없는 경우)
-        models = [
-          { id: "gemma4:e2b", name: "구글 투지" },
-          { id: "gemma4:e4b", name: "구글 포지" },
-          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
-          { id: "qwen3.5:9b", name: "큐쓰리" },
-          { id: "glm-ocr", name: "지엘엠" }
-        ]
-      }
-
-      if (num >= 1 && num <= models.length) {
+      if (num >= 1 && num <= 5) {
         const model = models[num - 1]
         setSelectedModel(model.id)
         setPendingAction(`model:${model.id}`)
@@ -1088,6 +1015,10 @@ export default function Home() {
                 setMenuState("model_select")
                 setMicState("off")
               }, delay1)
+            }}
+            onClassificationChange={(mode) => {
+              setFileClassification(mode)
+              console.log("[분류 변경]", mode)
             }}
           />
         </div>
