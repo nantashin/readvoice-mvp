@@ -23,7 +23,16 @@
       "Bash(npm list:*)",
       "Bash(rm:*)",
       "Bash(powershell.exe:*)",
-      "Bash(cmd.exe:*)"
+      "Bash(cmd.exe:*)",
+      "Bash(powershell\\\\n'\\) + len\\(')",
+      "Bash('\\); print\\(content[script_start:script_end]\\)\" > /tmp/new-daily-report.ps1 && head -100 /tmp/new-daily-report.ps1)",
+      "Bash(python -c \"import sys, json; data = json.load\\(sys.stdin\\); content = data['message']['content']; script_start = content.find\\('```powershell\\\\n'\\) + len\\('```powershell\\\\n'\\); script_end = content.rfind\\('\\\\n```'\\); print\\(content[script_start:script_end]\\)\" > /tmp/new-daily-report.ps1 && head -100 /tmp/new-daily-report.ps1)",
+      "Bash('; script_start = content.find\\(markers + 'powershell\\\\n'\\) + len\\(markers + 'powershell\\\\n'\\); script_end = content.rfind\\('\\\\n' + markers\\); print\\(content[script_start:script_end]\\)\" > /tmp/new-daily-report.ps1 && wc -l /tmp/new-daily-report.ps1)",
+      "Bash(python -c \"import sys, json; data = json.load\\(sys.stdin\\); content = data['message']['content']; markers = '```'; script_start = content.find\\(markers + 'powershell\\\\n'\\) + len\\(markers + 'powershell\\\\n'\\); script_end = content.rfind\\('\\\\n' + markers\\); print\\(content[script_start:script_end]\\)\" > /tmp/new-daily-report.ps1 && wc -l /tmp/new-daily-report.ps1)",
+      "Bash(python /tmp/extract_script.py \"C:\\\\Users\\\\tara0\\\\.claude\\\\projects\\\\C--Users-tara0-readvoice-mvp\\\\6fb3f1c2-cfdd-4be6-9f94-9c8f044d243f.jsonl\")",
+      "Bash(python check_end.py)",
+      "Bash(cp new-daily-report.ps1 scripts/daily-report.ps1)",
+      "Bash(rm -f new-daily-report.ps1 extract_script.py check_end.py content_end.txt after_script.txt six_ticks.txt)"
     ]
   }
 }
