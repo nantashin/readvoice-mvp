@@ -1,6 +1,13 @@
 # READ VOICE Pro - 일일 보고서 생성
 # Git 커밋 히스토리 기반 자동 요약
 
+# UTF-8 인코딩 설정 (한글 깨짐 방지)
+$OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+chcp 65001 | Out-Null
+
 $ROOT = "C:\Users\tara0\readvoice-mvp"
 $DATE = Get-Date -Format "yyyy-MM-dd"
 $REPORT_DIR = "$ROOT\docs\daily-reports"
@@ -23,15 +30,25 @@ if (Test-Path $workHoursFile) {
 }
 
 # Git 커밋 히스토리 (오늘 것만)
+# Git 환경변수 설정 (한글 깨짐 방지)
+$env:LANG = "ko_KR.UTF-8"
+$env:GIT_PAGER = ""
+
 Push-Location $ROOT
-$todayCommits = git log --since="midnight" --pretty=format:"%h|%s|%an|%ar" 2>$null
-$firstCommitTime = git log --since="midnight" --reverse --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
-$lastCommitTime = git log --since="midnight" --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
+$todayCommits = & git log --since="midnight" --pretty=format:"%h|%s|%an|%ar" 2>$null
+$firstCommitTime = & git log --since="midnight" --reverse --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
+$lastCommitTime = & git log --since="midnight" --pretty=format:"%H:%M" 2>$null | Select-Object -First 1
 Pop-Location
 
-# 커밋 파싱
+# 커밋 파싱 (UTF-8 강제 변환)
 $commits = @()
 if ($todayCommits) {
+    # CP949 → UTF-8 변환 (한글 깨짐 방지)
+    $todayCommits = $todayCommits | ForEach-Object {
+        $bytes = [System.Text.Encoding]::Default.GetBytes($_)
+        [System.Text.Encoding]::UTF8.GetString($bytes)
+    }
+
     foreach ($line in $todayCommits -split "`n") {
         if ($line) {
             $parts = $line -split "\|"
