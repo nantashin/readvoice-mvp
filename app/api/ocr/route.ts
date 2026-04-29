@@ -48,8 +48,10 @@ export async function POST(req: NextRequest) {
         console.log("[API] PDF 텍스트 추출 성공")
         return NextResponse.json({ text })
       } else {
-        console.log("[API] PDF 스캔본 감지 - Vision 모델 필요")
-        return NextResponse.json({ error: "scanned_pdf", message: "스캔된 PDF입니다. Vision 모델을 선택해주세요." }, { status: 422 })
+        // 스캔본일 경우 기본 모델(qwen3.5:9b)로 OCR 실행
+        console.log("[API] PDF 스캔본 감지 - qwen3.5:9b로 OCR 실행")
+        const ocrText = await extractTextFromPDF(buffer, file.name, "qwen3.5:9b")
+        return NextResponse.json({ text: ocrText })
       }
     }
 

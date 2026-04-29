@@ -4,6 +4,8 @@ export class BGMManager {
   private announcementRate: number = 1.0
   private firstAnnouncementTimer: ReturnType<typeof setTimeout> | null = null
   private pendingPlay: boolean = false
+  private savedTime: number = 0
+  private normalVolume: number = 0.4
 
   private playlist = [
     "/sounds/One-step-for-a-better-me.mp3",
@@ -50,7 +52,7 @@ export class BGMManager {
     console.log("[BGM] 재생 시도:", src)
 
     this.audio = new Audio(src)
-    this.audio.volume = 0.4
+    this.audio.volume = this.normalVolume
     this.audio.play()
       .then(() => {
         console.log("[BGM] 재생 성공")
@@ -72,7 +74,7 @@ export class BGMManager {
     if (this.audio) this.audio.volume = 0.1
     this.speak("아직 분석 중이에요. 조금만 더 기다려 주세요.")
     setTimeout(() => {
-      if (this.audio) this.audio.volume = 0.4
+      if (this.audio) this.audio.volume = this.normalVolume
     }, 3000)
   }
 
@@ -99,6 +101,7 @@ export class BGMManager {
         } else {
           this.audio?.pause()
           this.audio = null
+          this.savedTime = 0
           clearInterval(fade)
           console.log("[BGM] 페이드아웃 완료")
         }
@@ -108,6 +111,79 @@ export class BGMManager {
       clearInterval(this.intervalId)
       this.intervalId = null
     }
+  }
+
+  duck() {
+    if (!this.audio) return
+    console.log("[BGM] duck() - 볼륨 줄이기 시작")
+    const startVolume = this.audio.volume
+    const targetVolume = 0.08
+    const duration = 300 // 0.3초
+    const steps = 15
+    const stepTime = duration / steps
+    const volumeStep = (startVolume - targetVolume) / steps
+    let currentStep = 0
+
+    const fadeInterval = setInterval(() => {
+      if (!this.audio) {
+        clearInterval(fadeInterval)
+        return
+      }
+      currentStep++
+      const newVolume = startVolume - (volumeStep * currentStep)
+      this.audio.volume = Math.max(targetVolume, newVolume)
+
+      if (currentStep >= steps) {
+        this.audio.volume = targetVolume
+        clearInterval(fadeInterval)
+        console.log("[BGM] duck() 완료 - 볼륨:", targetVolume)
+      }
+    }, stepTime)
+  }
+
+  unduck() {
+    if (!this.audio) return
+    console.log("[BGM] unduck() - 볼륨 키우기 시작")
+    const startVolume = this.audio.volume
+    const targetVolume = this.normalVolume
+    const duration = 500 // 0.5초
+    const steps = 20
+    const stepTime = duration / steps
+    const volumeStep = (targetVolume - startVolume) / steps
+    let currentStep = 0
+
+    const fadeInterval = setInterval(() => {
+      if (!this.audio) {
+        clearInterval(fadeInterval)
+        return
+      }
+      currentStep++
+      const newVolume = startVolume + (volumeStep * currentStep)
+      this.audio.volume = Math.min(targetVolume, newVolume)
+
+      if (currentStep >= steps) {
+        this.audio.volume = targetVolume
+        clearInterval(fadeInterval)
+        console.log("[BGM] unduck() 완료 - 볼륨:", targetVolume)
+      }
+    }, stepTime)
+  }
+
+  pause() {
+    if (!this.audio) return
+    console.log("[BGM] pause() 호출")
+    this.savedTime = this.audio.currentTime
+    this.audio.pause()
+    console.log("[BGM] pause() 완료 - 저장된 시간:", this.savedTime)
+  }
+
+  resume() {
+    if (!this.audio) return
+    console.log("[BGM] resume() 호출 - 복원 시간:", this.savedTime)
+    this.audio.currentTime = this.savedTime
+    this.audio.play()
+      .then(() => console.log("[BGM] resume() 재생 성공"))
+      .catch(e => console.error("[BGM] resume() 재생 실패:", e))
   }
 
   addTrack(path: string) {

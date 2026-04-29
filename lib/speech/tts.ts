@@ -1,5 +1,6 @@
 "use client"
 import { useState, useCallback, useEffect, useRef } from "react"
+import { bgmManager } from "@/lib/audio/bgm-manager"
 
 /**
  * 큰 숫자 자릿수 포맷팅
@@ -132,10 +133,7 @@ export function cleanForTTS(text: string): string {
     .replace(/\bPNG\b/g, '피엔지')
     .replace(/\bJPG\b/g, '제이피지')
 
-  // 3. 가운뎃점 처리 (· → 쉼표)
-  processed = processed.replace(/·/g, ', ')
-
-  // 4. 화살표 및 항목 번호 처리 (줄 단위)
+  // 3. 화살표 및 항목 번호 처리 (줄 단위)
   const lines = processed.split('\n')
   const depthCounters: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 }
   let lastDepth = 0
@@ -163,15 +161,6 @@ export function cleanForTTS(text: string): string {
     }
     lastDepth = depth
 
-    // 불릿 기호 패턴 확인
-    const bulletMatch = line.match(/^[\s]*([-•●◆◇■□★☆✅✔✓☑※])\s*(.+)/)
-    if (bulletMatch) {
-      const content = bulletMatch[2]
-      const itemNum = getItemNumber(depth, depthCounters[depth])
-      depthCounters[depth]++
-      return `${itemNum}. ${content}`
-    }
-
     // 화살표 패턴 확인
     const arrowMatch = line.match(/^[\s]*([→➡▶⇒⟶])\s*(.+)/)
     if (arrowMatch) {
@@ -193,21 +182,21 @@ export function cleanForTTS(text: string): string {
 
   processed = processedLines.join('\n')
 
-  // 5. 특수 불릿/화살표 기호 제거 (남은 것들)
+  // 4. 특수 불릿/화살표 기호 완전 제거 (남은 것들)
   processed = processed
-    .replace(/[•●◆◇■□▶▷★☆✅✔✓☑※]/g, '')
+    .replace(/[·•●◆◇■□▶▷★☆✅✔✓☑※\*]/g, '')
     .replace(/[→➡⇒⟶]/g, '')
 
-  // 6. 큰 숫자 자릿수 변환 (보호된 패턴 제외)
+  // 5. 큰 숫자 자릿수 변환 (보호된 패턴 제외)
   processed = processed.replace(/(\d{4,})/g, (n) => formatLargeNumber(n))
 
-  // 7. 임시 토큰을 다시 원래 값으로 복원
+  // 6. 임시 토큰을 다시 원래 값으로 복원
   protectedValues.forEach((value, index) => {
     const token = `__PROTECTED_${index}__`
     processed = processed.replace(new RegExp(token, 'g'), value)
   })
 
-  // 8. 특수기호 정리 및 마무리
+  // 7. 특수기호 정리 및 마무리
   processed = processed
     .replace(/[|]{2,}/g, '')       // 표 구분선
     .replace(/\|/g, ', ')          // 표 셀 구분
@@ -315,6 +304,7 @@ function speakWithPauses(
 
   function speakNext() {
     if (index >= segments.length) {
+      bgmManager.unduck()
       if (onEnd) onEnd()
       return
     }
@@ -334,9 +324,10 @@ function speakWithPauses(
     utt.pitch = 1.7  // 20대 초반 여성의 밝고 경쾌한 음성 (솔 음계)
     if (voiceRef) utt.voice = voiceRef
 
-    // 첫 문장 시작 시 콜백 호출
+    // 첫 문장 시작 시 콜백 호출 및 BGM 덕킹
     if (!started && onStart) {
       started = true
+      bgmManager.duck()
       onStart()
     }
 
@@ -363,6 +354,7 @@ function speakWithPauses(
       }
       // 그 외 실제 오류만 로그
       console.warn('[TTS] 음성 재생 오류:', event.error)
+      bgmManager.unduck()
       if (onEnd) onEnd()
     }
 

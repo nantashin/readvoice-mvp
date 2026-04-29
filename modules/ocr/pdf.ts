@@ -4,13 +4,21 @@ import os from "os"
 import { execSync, spawnSync } from "child_process"
 import { extractTextOCR } from "./ocr-engine"
 
-// 모델별 타임아웃 (라마비전 10분 복구)
+// 모델별 타임아웃
 const MODEL_TIMEOUTS: Record<string, number> = {
   "gemma4:e2b": 120000,       // 2분
   "gemma4:e4b": 180000,       // 3분
-  "qwen3.5:9b": 300000,       // 5분
+  "qwen3.5:9b": 600000,       // 10분
   "llama3.2-vision:11b-instruct-q4_K_M": 600000,  // 10분
 }
+
+// 지원하는 Vision 모델 목록
+const SUPPORTED_VISION_MODELS = [
+  "gemma4:e2b",
+  "gemma4:e4b",
+  "llama3.2-vision:11b-instruct-q4_K_M",
+  "qwen3.5:9b"
+]
 
 function extractRawText(buffer: Buffer): string {
   const str = buffer.toString("binary")
@@ -139,73 +147,149 @@ export async function extractTextFromPDF(
         console.log(
           `[PDF] pypdfium2 변환 성공, ${parsed.total_pages}페이지`
         )
-        const base64Image = parsed.base64
-        const pngBuffer = Buffer.from(base64Image, "base64")
+        const base64ImageOriginal = parsed.base64
+        const pngBuffer = Buffer.from(base64ImageOriginal, "base64")
 
         const prefix =
           parsed.total_pages > 1
             ? `총 ${parsed.total_pages}페이지 문서입니다. 첫 페이지를 읽어드립니다.\n\n`
             : ""
 
-        // 모델별 처리
-        if (!selectedModel) {
-          // 기본값: Tesseract 시도
-          try {
-            const ocrText = await extractTextOCR(pngBuffer, "image/png", name)
-            return ocrText.replace(/^파일명: (.+)\n\n/, `파일명: $1\n\n${prefix}`)
-          } catch (e: unknown) {
-            const message = e instanceof Error ? e.message : String(e)
-            console.log("[PDF] Tesseract 실패:", message)
-            throw e
-          }
-        } else {
-          // Ollama Vision 직접 호출 (gemma4:e2b, gemma4:e4b, qwen3.5:9b만)
-          const OCR_PROMPT = `이 문서의 모든 텍스트를 정확히 읽어줘.
-위에서 아래로 순서대로 읽어줘.
-줄바꿈은 문단이 바뀔 때만 해줘.
-오타 없이 정확하게 읽어줘.
-설명이나 해석 추가 금지.`
+        // Step 2: 화질 강화 파이프라인
+        let tmpPngPath: string | null = null
+        let enhancedPngPath: string | null = null
+        let finalBase64Image = base64ImageOriginal
+        let tesseractDraft = ""
 
-          const models = [selectedModel]
-          const timeout = MODEL_TIMEOUTS[selectedModel || "gemma4:e4b"] || 120000
+        try {
+          // 임시 PNG 파일 저장
+          tmpPngPath = path.join(tmpDir, `rv_${Date.now()}.png`)
+          fs.writeFileSync(tmpPngPath, pngBuffer)
 
-          for (const model of models) {
-            try {
-              console.log(`[PDF] ${model}으로 분석... (타임아웃: ${timeout / 1000}초)`)
-              const res = await fetch("http://localhost:11434/api/chat", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  model,
-                  messages: [{
-                    role: "user",
-                    content: OCR_PROMPT,
-                    images: [base64Image]
-                  }],
-                  stream: false
-                }),
-                signal: AbortSignal.timeout(timeout)
-              })
+          // pdf-enhance.py 실행
+          const enhanceScript = path.join(process.cwd(), "server", "pdf-enhance.py")
+          enhancedPngPath = tmpPngPath.replace(".png", "_enhanced.png")
 
-              if (!res.ok) {
-                const errText = await res.text()
-                console.error(`[PDF] ${model} HTTP오류:`, res.status, errText)
-                throw new Error(`HTTP ${res.status}`)
-              }
+          console.log("[PDF] 화질 강화 실행...")
+          const enhanceResult = spawnSync(PYTHON_BIN, [enhanceScript, tmpPngPath, enhancedPngPath], {
+            timeout: 30000,
+            encoding: "utf8",
+            env
+          })
 
-              const data = await res.json()
-              const text = data.message?.content?.trim()
-              if (text && text.length > 10) {
-                console.log(`[PDF] ${model} 성공`)
-                return `파일명: ${name}\n\n${prefix}${text}`
-              }
-            } catch (e: unknown) {
-              const msg = e instanceof Error ? e.message : String(e)
-              console.error(`[PDF] ${model} fetch 실패:`, msg)
-              throw new Error(`${model} 분석 실패: ${msg}`)
+          if (enhanceResult.status === 0 && enhanceResult.stdout) {
+            const enhanceData = JSON.parse(enhanceResult.stdout.trim())
+            if (enhanceData.success && fs.existsSync(enhancedPngPath)) {
+              console.log("[PDF] 화질 강화 성공:", enhanceData.enhanced ? "강화됨" : "원본 유지")
+              const enhancedBuffer = fs.readFileSync(enhancedPngPath)
+              finalBase64Image = enhancedBuffer.toString("base64")
+            } else {
+              console.log("[PDF] 화질 강화 실패, 원본 사용:", enhanceData.error || "알 수 없음")
+              enhancedPngPath = tmpPngPath // fallback
             }
+          } else {
+            console.log("[PDF] 화질 강화 스크립트 오류, 원본 사용")
+            enhancedPngPath = tmpPngPath // fallback
           }
-          throw new Error("분석 실패. 다른 모델을 선택해 주세요.")
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.log("[PDF] 화질 강화 예외, 원본 사용:", msg)
+          enhancedPngPath = tmpPngPath // fallback
+        }
+
+        // Step 3: Tesseract OCR로 초안 추출 (강화된 이미지 사용)
+        try {
+          const tesseractScript = path.join(process.cwd(), "server", "tesseract-ocr.py")
+          const imageForOCR = enhancedPngPath || tmpPngPath || ""
+
+          if (imageForOCR) {
+            console.log("[PDF] Tesseract OCR 초안 추출...")
+            const tesseractResult = spawnSync(PYTHON_BIN, [tesseractScript, imageForOCR], {
+              timeout: 60000,
+              encoding: "utf8",
+              env
+            })
+
+            if (tesseractResult.status === 0 && tesseractResult.stdout) {
+              const tesseractData = JSON.parse(tesseractResult.stdout.trim())
+              if (tesseractData.success && tesseractData.text) {
+                tesseractDraft = tesseractData.text
+                console.log(`[PDF] Tesseract 성공: ${tesseractData.length || tesseractDraft.length}자`)
+              } else {
+                console.log("[PDF] Tesseract 실패:", tesseractData.error || "빈 결과")
+              }
+            } else {
+              console.log("[PDF] Tesseract 스크립트 오류")
+            }
+          } else {
+            console.log("[PDF] Tesseract 건너뜀: 이미지 경로 없음")
+          }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.log("[PDF] Tesseract 예외:", msg)
+        }
+
+        // Step 4: Vision 모델로 교정 (강화된 이미지 사용)
+        if (!selectedModel || !SUPPORTED_VISION_MODELS.includes(selectedModel)) {
+          throw new Error("지원하지 않는 모델입니다. gemma4:e2b, gemma4:e4b, llama3.2-vision, qwen3.5:9b 중 선택해주세요.")
+        }
+
+        // Tesseract 결과에 따라 프롬프트 구성
+        const OCR_PROMPT = tesseractDraft.length > 50
+          ? `아래는 이 문서를 OCR한 초안이야. 오타와 오류를 수정해서 정확한 한국어로 다시 읽어줘. 영어는 한국어 발음으로. 레이아웃 순서 유지.\n\n초안:\n${tesseractDraft}`
+          : "이 문서의 모든 텍스트를 위에서 아래로 정확히 읽어줘. 한국어로만 출력해줘."
+
+        const timeout = MODEL_TIMEOUTS[selectedModel] || 300000
+
+        try {
+          console.log(`[PDF] ${selectedModel}으로 OCR 실행... (타임아웃: ${timeout / 1000}초)`)
+          const res = await fetch("http://localhost:11434/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: selectedModel,
+              messages: [{
+                role: "user",
+                content: OCR_PROMPT,
+                images: [finalBase64Image]
+              }],
+              stream: false
+            }),
+            signal: AbortSignal.timeout(timeout)
+          })
+
+          if (!res.ok) {
+            const errText = await res.text()
+            console.error(`[PDF] ${selectedModel} HTTP 오류:`, res.status, errText)
+            throw new Error(`HTTP ${res.status}`)
+          }
+
+          const data = await res.json()
+          const text = data.message?.content?.trim()
+
+          if (text && text.length > 5) {
+            console.log(`[PDF] ${selectedModel} OCR 성공`)
+            return `파일명: ${name}\n\n${prefix}${text}`
+          } else {
+            console.log(`[PDF] ${selectedModel} 텍스트 추출 실패 (빈 응답)`)
+            return "문서를 읽을 수 없어요. 다른 모델을 선택해 주세요."
+          }
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e)
+          console.error(`[PDF] ${selectedModel} OCR 실패:`, msg)
+          throw new Error(`${selectedModel} 분석 실패: ${msg}`)
+        } finally {
+          // 임시 파일 정리
+          setTimeout(() => {
+            try {
+              if (tmpPngPath && fs.existsSync(tmpPngPath)) fs.unlinkSync(tmpPngPath)
+              if (enhancedPngPath && enhancedPngPath !== tmpPngPath && fs.existsSync(enhancedPngPath)) {
+                fs.unlinkSync(enhancedPngPath)
+              }
+            } catch (e) {
+              // 무시
+            }
+          }, 1000)
         }
       }
     } catch (e: unknown) {

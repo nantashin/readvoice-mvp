@@ -124,8 +124,12 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
   }, [])
 
   const processFile = async (file: File, modelId: string) => {
+    console.log("[processFile] 분석 시작 - 모델:", modelId)
     setLoading(true)
     onStatusChange("processing")
+
+    // 모든 모델 분석 시작 시 BGM 시작 (공통)
+    bgmManager.start()
 
     try {
       const result = await analyzeFile(file, modelId as VisionModel, "describe")
@@ -210,7 +214,6 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         // TTS 끝난 후 자동 분석 시작
         setTimeout(() => {
           onStatusChange("processing")
-          bgmManager.start()
           processFile(file, autoModel)
         }, (message.length / 10) * 1000 + 500)
       } catch (e) {

@@ -38,13 +38,7 @@ const DOCUMENT_MODEL_MENU_TTS = `어떤 모델로 읽어 드릴까요?
 사번. 구글 사기가. 빠르고 정확합니다.
 스페이스바를 누르고 번호로 말씀해 주세요.`
 
-const MODEL_MENU_TTS = `어떤 모델로 분석해 드릴까요?
-일번. 구글 이기가. 가장 빠르게 분석해드려요.
-이번. 구글 사기가. 빠르면서 정확하게 분석해드려요.
-삼번. 라마비전. 가장 꼼꼼하게 분석해드려요.
-사번. 큐쓰리. 텍스트 인식에 강해요.
-오번. 지엘엠. 문서 읽기에 특화되어 있어요.
-스페이스바를 누르고 번호로 말씀해 주세요.`
+const MODEL_MENU_TTS = "어떤 모델로 바꿀까요? 일번, 구글 이기가, 15초에서 20초. 이번, 구글 사기가, 30초에서 40초. 삼번, 라마비전, 2분에서 3분. 사번, 큐쓰리, 30초에서 1분. 오번, 올름오씨알, 1분에서 2분. 육번, 지엘엠, 30초에서 1분. 스페이스바를 누르고 번호로 말씀해 주세요."
 
 // 자연어 명령어 패턴
 const VOICE_COMMANDS = {
@@ -401,12 +395,10 @@ export default function Home() {
     if (VOICE_COMMANDS.changeModel.test(t)) {
       setMenuState("model_select")
       setMicState("speaking")
-      speak(MODEL_MENU_TTS)
-      const delay = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 1000
-      setTimeout(() => {
+      speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
         setMicState("off")
         startListening()
-      }, delay)
+      })
       return
     }
 
@@ -492,7 +484,7 @@ export default function Home() {
           modelName = "라마비전"
         }
       } else {
-        // fileType이 설정되지 않은 경우 (기존 로직 유지)
+        // fileType이 설정되지 않은 경우 (6개 모델)
         if (/일번|1|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
           modelId = "gemma4:e2b"
           modelName = "구글 이기가"
@@ -502,10 +494,13 @@ export default function Home() {
         } else if (/삼번|3|라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
-        } else if (/사번|4|큐|qwen|q3/i.test(t)) {
+        } else if (/사번|4|큐|qwen|q3|큐쓰리/i.test(t)) {
           modelId = "qwen3.5:9b"
           modelName = "큐쓰리"
-        } else if (/오번|5|지엘엠|glm/i.test(t)) {
+        } else if (/오번|5|올름|olmocr|올름오씨알/i.test(t)) {
+          modelId = "richardyoung/olmocr2:7b-q8"
+          modelName = "올름오씨알"
+        } else if (/육번|6|지엘엠|glm/i.test(t)) {
           modelId = "glm-ocr"
           modelName = "지엘엠"
         }
@@ -531,7 +526,7 @@ export default function Home() {
           startListening()
         }, delay)
       } else {
-        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "오번" : "오번"
+        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "오번" : "육번"
         speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`)
         const delay = (35 / 10) * 1000 / speechRate + 500
         setTimeout(() => {
@@ -550,17 +545,13 @@ export default function Home() {
       }
       if (/아니|취소|싫어|말고/.test(t)) {
         const msg1 = "알겠어요, 모델 선택으로 돌아갈게요."
-        speak(msg1)
-        const delay1 = (msg1.length / 10) * 1000 / speechRate + 300
-        setTimeout(() => {
-          speak(MODEL_MENU_TTS)
+        speak(msg1, speechRate, 1.7, () => {
           setMenuState("model_select")
-          const delay2 = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-          setTimeout(() => {
+          speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
             setMicState("off")
             startListening()
-          }, delay2)
-        }, delay1)
+          })
+        })
         return
       }
       // 네/아니오가 아닌 경우
@@ -637,13 +628,11 @@ export default function Home() {
         if (fileInput2) fileInput2.click()
         break
       case "model_change":
-        speak(MODEL_MENU_TTS)
         setMenuState("model_select")
-        const delayModelChange = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-        setTimeout(() => {
+        speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
           setMicState("off")
           startListening()
-        }, delayModelChange)
+        })
         break
       case "confirm":
         executeCurrentAction()
@@ -735,13 +724,11 @@ export default function Home() {
           setMicState("off")
           break
         case 4:
-          speak(MODEL_MENU_TTS)
           setMenuState("model_select")
-          const delayMenu4 = (MODEL_MENU_TTS.length / 10) * 1000 / speechRate + 500
-          setTimeout(() => {
+          speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
             setMicState("off")
             startListening()
-          }, delayMenu4)
+          })
           break
         case 5:
           speak("처음으로 돌아갈게요.")
@@ -834,14 +821,10 @@ export default function Home() {
       setMenuState("idle")
       setMicState("processing")
 
-      // TTS 끝난 후 BGM + 분석 시작
+      // TTS 끝난 후 분석 시작 (BGM은 processFile에서 자동 시작)
       const delay = (message.length / 10) * 1000 / speechRate + 500
-      console.log("[executeCurrentAction] TTS 끝난 후 BGM 시작 예정, delay:", delay)
+      console.log("[executeCurrentAction] TTS 끝난 후 분석 시작 예정, delay:", delay)
       setTimeout(() => {
-        // BGM 시작
-        console.log("[executeCurrentAction] BGM 시작 시도")
-        bgmManager.start(speechRate)
-
         // 파일 분석 시작
         if (pendingFile) {
           console.log("[executeCurrentAction] 파일 분석 시작:", pendingFile.name)
@@ -1130,14 +1113,10 @@ export default function Home() {
             }}
             onFileSelected={(file) => {
               setPendingFile(file)
-              const msg = "파일이 선택됐어요. 어떤 모델로 분석해 드릴까요?"
-              speak(msg)
-              const delay1 = (msg.length / 10) * 1000 / speechRate + 300
-              setTimeout(() => {
-                speak(MODEL_MENU_TTS)
-                setMenuState("model_select")
-                setMicState("off")
-              }, delay1)
+              const fullMessage = "파일이 선택됐어요. " + MODEL_MENU_TTS
+              speak(fullMessage)
+              setMenuState("model_select")
+              setMicState("off")
             }}
           />
         </div>
