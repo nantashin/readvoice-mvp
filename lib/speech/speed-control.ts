@@ -15,13 +15,13 @@ export function parseSpeedCommand(
       return { rate: 1.0, message: "보통 속도로 설정했습니다." }
     }
     if (lowerText.includes("이번") || lowerText.includes("2번") || lowerText.includes("둘") || lowerText.includes("조금")) {
-      return { rate: 1.2, message: "조금 빠르게 설정했습니다." }
+      return { rate: 1.5, message: "조금 빠르게 설정했습니다." }
     }
     if (lowerText.includes("삼번") || lowerText.includes("3번") || lowerText.includes("셋") || lowerText.includes("빠르게")) {
-      return { rate: 1.5, message: "빠르게 설정했습니다." }
+      return { rate: 2.0, message: "빠르게 설정했습니다." }
     }
     if (lowerText.includes("사번") || lowerText.includes("4번") || lowerText.includes("넷") || lowerText.includes("매우")) {
-      return { rate: 2.0, message: "매우 빠르게 설정했습니다." }
+      return { rate: 3.0, message: "매우 빠르게 설정했습니다." }
     }
     return null
   }
@@ -47,5 +47,5 @@ export function loadSpeechRate(): number {
       return parseFloat(saved)
     }
   }
-  return 1.0
+  return 1.5
 }

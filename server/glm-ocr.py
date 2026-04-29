@@ -82,6 +82,14 @@ def run_glm_ocr(image_path: str) -> str:
         env = os.environ.copy()
         env['PYTHONIOENCODING'] = 'utf-8'
 
+        # Ollama PATH 명시적 추가 (Node.js subprocess 환경 보장)
+        if sys.platform == "win32":
+            ollama_dir = r"C:\Users\tara0\AppData\Local\Programs\Ollama"
+            if "PATH" in env:
+                env["PATH"] = f"{ollama_dir};{env['PATH']}"
+            else:
+                env["PATH"] = ollama_dir
+
         result = subprocess.run(
             [ollama_bin, "run", "glm-ocr",
              "이 문서의 모든 텍스트를 읽어줘.",

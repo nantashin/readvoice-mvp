@@ -372,27 +372,25 @@ export default function Home() {
 
     // 이미지 관련
     if (VOICE_COMMANDS.image.test(t)) {
-      setMicState("speaking")
-      speak("이미지 분석 모드예요. 파일을 올려주세요.")
-      setTimeout(() => {
-        setMicState("off")
-        // 파일 선택창 열기 트리거
-        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
-        if (fileInput) fileInput.click()
-      }, 2000)
+      setMenuState("image")
+      setMicState("off")
+      // 즉시 파일 선택창 열기 (사용자 제스처 컨텍스트 내에서)
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      if (fileInput) {
+        fileInput.click()
+      }
       return
     }
 
     // 문서/OCR 관련
     if (VOICE_COMMANDS.document.test(t)) {
-      setMicState("speaking")
-      speak("문서 읽기 모드예요. 파일을 올려주시거나 카메라 버튼을 눌러주세요.")
-      setTimeout(() => {
-        setMicState("off")
-        // 파일 선택창 열기 트리거
-        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
-        if (fileInput) fileInput.click()
-      }, 2500)
+      setMenuState("ocr")
+      setMicState("off")
+      // 즉시 파일 선택창 열기 (사용자 제스처 컨텍스트 내에서)
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      if (fileInput) {
+        fileInput.click()
+      }
       return
     }
 
@@ -617,18 +615,23 @@ export default function Home() {
 
     switch (intent) {
       case "search":
+        setMicState("speaking")
         speak("네, 바로 찾아드릴게요.")
         setTimeout(() => doChat(transcript), 1500)
         break
       case "ocr":
-        speak("문서 읽기 모드예요. 파일을 올려주시거나 카메라 버튼을 눌러주세요.")
         setMenuState("ocr")
         setMicState("off")
+        // 즉시 파일 선택창 열기
+        const fileInput1 = document.querySelector('input[type="file"]') as HTMLInputElement
+        if (fileInput1) fileInput1.click()
         break
       case "image":
-        speak("이미지 분석 모드예요. 파일을 올려주세요.")
         setMenuState("image")
         setMicState("off")
+        // 즉시 파일 선택창 열기
+        const fileInput2 = document.querySelector('input[type="file"]') as HTMLInputElement
+        if (fileInput2) fileInput2.click()
         break
       case "model_change":
         speak(MODEL_MENU_TTS)
@@ -643,19 +646,23 @@ export default function Home() {
         executeCurrentAction()
         break
       case "cancel":
+        setMicState("speaking")
         speak("알겠어요, 취소할게요.")
         setTimeout(() => {
           speak(MAIN_MENU_TTS)
           setMenuState("main_menu")
-          setMicState("off")
+          const delay = (MAIN_MENU_TTS.length / 10) * 1000 / speechRate + 500
+          setTimeout(() => setMicState("off"), delay)
         }, 1500)
         break
       case "restart":
+        setMicState("speaking")
         speak("처음으로 돌아갈게요.")
         setTimeout(() => {
           speak(INTRO_TTS)
           setMenuState("idle")
-          setMicState("off")
+          const delay = (INTRO_TTS.length / 10) * 1000 / speechRate + 500
+          setTimeout(() => setMicState("off"), delay)
         }, 1000)
         break
       case "menu_1":
@@ -1104,10 +1111,16 @@ export default function Home() {
                     }, askDuration)
                   }, textDuration)
                 } else {
-                  // 원문이 없으면 (PDF 또는 한국어 직접 모델) 그냥 종료
-                  const textDuration = (text.length / 10) * 1000 / speechRate + 500
+                  // 원문이 없으면 (PDF 또는 한국어 직접 모델) 다른 모델 선택 안내
+                  const textDuration = (text.length / 10) * 1000 / speechRate + 1000
                   setTimeout(() => {
-                    setMicState("off")
+                    const msg = "다른 모델로도 분석 가능합니다. 모델을 바꾸시려면 '모델 바꿔'라고 말씀해 주세요."
+                    speak(msg)
+                    const msgDuration = (msg.length / 10) * 1000 / speechRate + 500
+                    setTimeout(() => {
+                      setMicState("off")
+                      setMenuState("idle")
+                    }, msgDuration)
                   }, textDuration)
                 }
               }, 2000)

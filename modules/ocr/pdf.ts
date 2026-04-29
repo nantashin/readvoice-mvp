@@ -99,8 +99,17 @@ export async function extractTextFromPDF(
     fs.writeFileSync(tmpPdf, buffer)
 
     try {
-      const PYTHON_BIN = process.env.PYTHON_BIN || "python"
+      const PYTHON_BIN = process.env.PYTHON_BIN ||
+        "C:\\Users\\tara0\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
       console.log("[OCR] PYTHON_BIN:", PYTHON_BIN)
+
+      const OLLAMA_PATH = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
+      const env = {
+        ...process.env,
+        PATH: `${OLLAMA_PATH};${process.env.PATH}`,
+        PYTHONIOENCODING: "utf-8",
+        PYTHON_BIN
+      }
 
       const scriptPath = path.join(process.cwd(), "server", "pdf-to-image.py")
 
@@ -108,6 +117,7 @@ export async function extractTextFromPDF(
         timeout: 60000,
         maxBuffer: 50 * 1024 * 1024, // 50MB 버퍼
         encoding: "utf8",
+        env
       })
 
       if (result.error) throw result.error

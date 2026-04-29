@@ -31,11 +31,12 @@ export async function extractTextOCR(
   const PYTHON_BIN = process.env.PYTHON_BIN ||
     "C:\\Users\\tara0\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
 
-  const ollamaPath = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
+  const OLLAMA_PATH = "C:\\Users\\tara0\\AppData\\Local\\Programs\\Ollama"
   const env = {
     ...process.env,
-    PATH: `${ollamaPath};${process.env.PATH}`,
-    PYTHONIOENCODING: "utf-8"
+    PATH: `${OLLAMA_PATH};${process.env.PATH}`,
+    PYTHONIOENCODING: "utf-8",
+    PYTHON_BIN
   }
 
   // PDF OCR 파이프라인 (이미지 묘사는 제외, OCR 전용)

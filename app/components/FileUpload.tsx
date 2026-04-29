@@ -110,6 +110,19 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     return () => window.removeEventListener("startAnalysis", handleStartAnalysis as EventListener)
   }, [])
 
+  // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  useEffect(() => {
+    const handleOpenFileInput = () => {
+      console.log("[FileUpload] openFileInput 이벤트 수신")
+      if (inputRef.current) {
+        inputRef.current.click()
+      }
+    }
+
+    window.addEventListener("openFileInput", handleOpenFileInput)
+    return () => window.removeEventListener("openFileInput", handleOpenFileInput)
+  }, [])
+
   const processFile = async (file: File, modelId: string) => {
     setLoading(true)
     onStatusChange("processing")
@@ -175,34 +188,43 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         console.log("[자동 분류] 결과:", classification)
         bgmManager.stop()
 
-        // 분류 결과에 따라 다른 안내
+        // 분류 결과에 따라 자동으로 가장 빠른 모델 선택 후 즉시 실행
+        let autoModel = ""
         let message = ""
-        let eventType: "imageSelected" | "imageDocSelected" | "imageMixedSelected" = "imageSelected"
 
         if (classification === "document") {
-          message = "문서 이미지로 판단했어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천, 30초에서 1분. 이번, 올름오씨알, 레이아웃 특화, 1분에서 2분. 삼번, 지엘엠, 문서 전용, 30초에서 1분. 사번, 구글 사기가, 범용, 30초에서 40초. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
-          eventType = "imageDocSelected"
+          autoModel = "qwen3.5:9b" // 문서는 큐쓰리로 자동 시작
+          message = "문서 이미지로 판단했어요. 큐쓰리 모델로 읽어드릴게요."
         } else if (classification === "photo") {
-          message = "이미지로 판단했어요. 어떤 모델로 설명해드릴까요? 일번, 구글 이기가, 가장 빠르게 15초에서 20초. 이번, 구글 사기가, 균형 있게 30초에서 40초. 삼번, 라마비전, 가장 정밀하게 2분에서 3분. 스페이스바를 누르고 번호나 이름으로 말씀해 주세요."
-          eventType = "imageSelected"
+          autoModel = "gemma4:e2b" // 사진은 구글 이기가로 자동 시작
+          message = "이미지로 판단했어요. 구글 이기가 모델로 설명해 드릴게요."
         } else {
-          // mixed
-          message = "그림과 글자가 함께 있어요. 그림 설명을 먼저 해드릴까요, 아니면 글자를 먼저 읽어드릴까요? 일번, 그림 설명 먼저. 이번, 글자 읽기 먼저. 스페이스바를 누르고 번호로 말씀해 주세요."
-          eventType = "imageMixedSelected"
+          // mixed - 기본은 문서로 처리
+          autoModel = "qwen3.5:9b"
+          message = "그림과 글자가 함께 있어요. 글자를 먼저 읽어드릴게요."
         }
 
+        onStatusChange("speaking")
         tts.speak(message)
+
+        // TTS 끝난 후 자동 분석 시작
         setTimeout(() => {
-          window.dispatchEvent(new CustomEvent(eventType, { detail: { file, classification } }))
-        }, 1000)
+          onStatusChange("processing")
+          bgmManager.start()
+          processFile(file, autoModel)
+        }, (message.length / 10) * 1000 + 500)
       } catch (e) {
         console.error("[자동 분류] 실패:", e)
         bgmManager.stop()
         const msg = "자동 판단이 어려웠어요. 이미지인지 문서인지 말씀해 주세요."
+        onStatusChange("speaking")
         tts.speak(msg)
+
+        const ttsDelay = (msg.length / 10) * 1000 + 1000
         setTimeout(() => {
+          onStatusChange("idle")
           window.dispatchEvent(new CustomEvent("classifyFailed", { detail: { file } }))
-        }, 2000)
+        }, ttsDelay)
       } finally {
         setLoading(false)
       }
@@ -233,23 +255,51 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         if (res.ok && data.text) {
           // 텍스트 추출 성공 - 바로 읽기
           console.log("[PDF] 텍스트 추출 성공")
+          onStatusChange("speaking")
           tts.speak("문서를 읽어드릴게요.")
           setTimeout(() => {
             onResult(data.text)
-            onStatusChange("speaking")
+            // onStatusChange("speaking")는 onResult 내부에서 호출됨
           }, 1500)
         } else if (data.error === "scanned_pdf") {
-          // 스캔된 PDF - 자동 전처리 후 모델 선택
-          console.log("[PDF] 스캔된 문서 감지 - 이미지 변환 중")
-          tts.speak("스캔된 문서예요. 이미지로 변환해서 읽을게요. 잠시만 기다려 주세요.")
+          // 스캔된 PDF - 자동으로 큐쓰리 모델로 즉시 실행
+          console.log("[PDF] 스캔된 문서 감지 - 큐쓰리로 자동 실행")
+          onStatusChange("speaking")
+          tts.speak("스캔된 문서예요. 큐쓰리 모델로 읽어드릴게요.")
 
-          const msg = "문서 준비가 됐어요. 어떤 모델로 읽어드릴까요? 일번, 큐쓰리, 추천. 이번, 올름오씨알, 레이아웃 특화. 삼번, 지엘엠. 사번, 구글 포지. 오번, 라마비전, 가장 정밀하지만 3분 걸려요. 스페이스바를 누르고 번호로 말씀해 주세요."
+          setTimeout(async () => {
+            try {
+              onStatusChange("processing")
+              bgmManager.start()
 
-          setTimeout(() => {
-            tts.speak(msg)
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent("pdfScannedSelected", { detail: { file } }))
-            }, 1000)
+              // 스캔 PDF를 큐쓰리 모델로 분석
+              const formData = new FormData()
+              formData.append("file", file)
+              formData.append("model", "qwen3.5:9b")
+
+              const res = await fetch("/api/ocr", {
+                method: "POST",
+                body: formData,
+              })
+
+              const result = await res.json()
+              bgmManager.stop()
+
+              if (res.ok && result.text) {
+                console.log("[PDF] 큐쓰리 OCR 성공")
+                onResult(result.text)
+                onStatusChange("speaking")
+              } else {
+                throw new Error(result.error || "OCR 실패")
+              }
+            } catch (e) {
+              bgmManager.stop()
+              const msg = e instanceof Error ? e.message : "PDF OCR 중 오류가 발생했습니다."
+              console.error("[PDF OCR]", e)
+              setError(msg)
+              tts.speak(msg)
+              onStatusChange("idle")
+            }
           }, 2000)
         } else {
           throw new Error(data.error || "텍스트 추출 실패")
@@ -444,7 +494,6 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         tabIndex={0}
         aria-label="파일 업로드 영역. 이미지나 PDF를 드래그하거나 클릭해서 선택하세요."
         onClick={(e) => {
-          tts.speak("파일 선택 창이 열립니다. 기본 폴더는 리드보이스 업로드 폴더입니다. 이미지 또는 PDF 파일을 선택해 주세요.")
           inputRef.current?.click()
           // 클릭 후 버튼에서 포커스 제거
           setTimeout(() => {
