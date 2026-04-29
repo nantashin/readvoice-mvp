@@ -412,7 +412,7 @@ export function useSpeechSynthesis() {
     window.speechSynthesis.onvoiceschanged = loadVoice
   }, [])
 
-  const speak = useCallback((text: string, rate: number = 1.15) => {
+  const speak = useCallback((text: string, rate: number = 1.15, onEnd?: () => void) => {
     if (!text || typeof window === "undefined") return
 
     speakWithPauses(
@@ -420,7 +420,10 @@ export function useSpeechSynthesis() {
       rate,
       voiceRef.current,
       () => setIsSpeaking(true),
-      () => setIsSpeaking(false)
+      () => {
+        setIsSpeaking(false)
+        if (onEnd) onEnd()
+      }
     )
   }, [])
 

@@ -130,7 +130,7 @@ export default function Home() {
     }
   }, [response])
 
-  const speak = useCallback((text: string, rate?: number, pitch: number = 1.7) => {
+  const speak = useCallback((text: string, rate?: number, pitch: number = 1.7, onEnd?: () => void) => {
     window.speechSynthesis.cancel()
     // TTS 전처리: 불릿/특수기호 제거, 마크다운 정리
     const cleanedText = cleanForTTS(text)
@@ -138,6 +138,9 @@ export default function Home() {
     utt.lang = "ko-KR"
     utt.rate = rate || speechRate
     utt.pitch = pitch  // 솔 높이 (밝고 경쾌한 음성)
+    if (onEnd) {
+      utt.onend = onEnd
+    }
     window.speechSynthesis.speak(utt)
   }, [speechRate])
 
@@ -1092,38 +1095,29 @@ export default function Home() {
                 setOriginalText(original)
               }
 
-              speak("분석이 끝났어요! 읽어드릴게요.")
-              setTimeout(() => {
-                speak(text)
-
-                // 한국어 TTS가 끝난 후, 원문이 있으면 물어보기
-                // 원문이 빈 문자열이 아니고 실제 내용이 있는 경우에만 (번역 모델인 경우만)
-                if (original && original.length > 10) {
-                  const textDuration = (text.length / 10) * 1000 / speechRate + 1000
-                  setTimeout(() => {
+              // 분석 완료 안내 → 결과 읽기 → 후속 안내 (onEnd 콜백으로 연결)
+              tts.speak("분석이 끝났어요! 읽어드릴게요.", speechRate, () => {
+                // 결과 텍스트 읽기
+                tts.speak(text, speechRate, () => {
+                  // 텍스트 읽기가 끝난 후
+                  if (original && original.length > 10) {
+                    // 원문이 있으면 원문 듣기 제안
                     const askMsg = "원문도 들으시겠어요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요."
-                    speak(askMsg)
                     setMenuState("ask_original")
-                    const askDuration = (askMsg.length / 10) * 1000 / speechRate + 500
-                    setTimeout(() => {
+                    tts.speak(askMsg, speechRate, () => {
                       setMicState("off")
                       startListening()
-                    }, askDuration)
-                  }, textDuration)
-                } else {
-                  // 원문이 없으면 (PDF 또는 한국어 직접 모델) 다른 모델 선택 안내
-                  const textDuration = (text.length / 10) * 1000 / speechRate + 1000
-                  setTimeout(() => {
+                    })
+                  } else {
+                    // 원문이 없으면 다른 모델 선택 안내
                     const msg = "다른 모델로도 분석 가능합니다. 모델을 바꾸시려면 '모델 바꿔'라고 말씀해 주세요."
-                    speak(msg)
-                    const msgDuration = (msg.length / 10) * 1000 / speechRate + 500
-                    setTimeout(() => {
+                    tts.speak(msg, speechRate, () => {
                       setMicState("off")
                       setMenuState("idle")
-                    }, msgDuration)
-                  }, textDuration)
-                }
-              }, 2000)
+                    })
+                  }
+                })
+              })
             }}
             onStatusChange={(s) => {
               if (s === "processing") setMicState("processing")
