@@ -236,8 +236,11 @@ export async function extractTextFromPDF(
 
         // Tesseract 결과에 따라 프롬프트 구성
         const OCR_PROMPT = tesseractDraft.length > 50
-          ? `아래는 이 문서를 OCR한 초안이야. 오타와 오류를 수정해서 정확한 한국어로 다시 읽어줘. 영어는 한국어 발음으로. 레이아웃 순서 유지.\n\n초안:\n${tesseractDraft}`
-          : "이 문서의 모든 텍스트를 위에서 아래로 정확히 읽어줘. 한국어로만 출력해줘."
+          ? `아래는 Tesseract OCR로 추출한 초안 텍스트입니다. 오타와 오인식을 수정하고, 레이아웃 순서를 유지하여 정확한 한국어로 출력하세요. 영어 단어는 한국어 발음으로 변환하세요.\n\n초안:\n${tesseractDraft}\n\n정확히 교정된 텍스트를 출력하세요:`
+          : "이 문서 이미지의 모든 텍스트를 위에서 아래, 왼쪽에서 오른쪽 순서로 정확히 읽어서 한국어로 출력하세요. 영어 단어는 한국어 발음으로 변환하세요."
+
+        console.log(`[PDF] OCR 프롬프트 타입: ${tesseractDraft.length > 50 ? "교정 모드" : "직접 읽기 모드"}`)
+        console.log(`[PDF] Tesseract 초안 길이: ${tesseractDraft.length}자`)
 
         const timeout = MODEL_TIMEOUTS[selectedModel] || 300000
 
@@ -265,13 +268,26 @@ export async function extractTextFromPDF(
           }
 
           const data = await res.json()
+          console.log(`[PDF] ${selectedModel} 응답 구조:`, JSON.stringify(data, null, 2))
+
           const text = data.message?.content?.trim()
 
           if (text && text.length > 5) {
-            console.log(`[PDF] ${selectedModel} OCR 성공`)
+            console.log(`[PDF] ${selectedModel} OCR 성공, 텍스트 길이: ${text.length}자`)
             return `파일명: ${name}\n\n${prefix}${text}`
           } else {
-            console.log(`[PDF] ${selectedModel} 텍스트 추출 실패 (빈 응답)`)
+            console.log(`[PDF] ${selectedModel} 텍스트 추출 실패`)
+            console.log(`  - data.message 존재:`, !!data.message)
+            console.log(`  - content 값:`, data.message?.content)
+            console.log(`  - content 타입:`, typeof data.message?.content)
+            console.log(`  - content 길이:`, data.message?.content?.length)
+
+            // Tesseract 결과라도 반환 (폴백)
+            if (tesseractDraft && tesseractDraft.length > 50) {
+              console.log(`[PDF] Vision 실패, Tesseract 결과 반환 (${tesseractDraft.length}자)`)
+              return `파일명: ${name}\n\n${prefix}[Tesseract 초안]\n${tesseractDraft}`
+            }
+
             return "문서를 읽을 수 없어요. 다른 모델을 선택해 주세요."
           }
         } catch (e: unknown) {

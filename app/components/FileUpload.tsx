@@ -264,21 +264,29 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
             onResult(data.text)
             // onStatusChange("speaking")는 onResult 내부에서 호출됨
           }, 1500)
-        } else if (data.error === "scanned_pdf") {
-          // 스캔된 PDF - 자동으로 큐쓰리 모델로 즉시 실행
-          console.log("[PDF] 스캔된 문서 감지 - 큐쓰리로 자동 실행")
+        } else if (data.error === "SCAN_PDF_DETECTED") {
+          // 스캔된 PDF - 사용자가 선택한 모델 또는 기본 모델로 실행
+          const pdfOcrModels = ["qwen3.5:9b", "richardyoung/olmocr2:7b-q8", "glm-ocr", "gemma4:e4b", "llama3.2-vision:11b-instruct-q4_K_M"]
+          const useModel = pdfOcrModels.includes(selectedModel) ? selectedModel : "qwen3.5:9b"
+
+          const modelName = useModel === "qwen3.5:9b" ? "큐쓰리" :
+                           useModel === "richardyoung/olmocr2:7b-q8" ? "올름오씨알" :
+                           useModel === "glm-ocr" ? "지엘엠" :
+                           useModel === "gemma4:e4b" ? "구글 사기가" : "라마비전"
+
+          console.log(`[PDF] 스캔된 문서 감지 - ${modelName} 모델로 실행`)
           onStatusChange("speaking")
-          tts.speak("스캔된 문서예요. 큐쓰리 모델로 읽어드릴게요.")
+          tts.speak(`스캔된 문서예요. ${modelName} 모델로 읽어드릴게요.`)
 
           setTimeout(async () => {
             try {
               onStatusChange("processing")
               bgmManager.start()
 
-              // 스캔 PDF를 큐쓰리 모델로 분석
+              // 스캔 PDF를 선택된 모델로 분석
               const formData = new FormData()
               formData.append("file", file)
-              formData.append("model", "qwen3.5:9b")
+              formData.append("model", useModel)
 
               const res = await fetch("/api/ocr", {
                 method: "POST",
