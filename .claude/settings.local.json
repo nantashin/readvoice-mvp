@@ -38,7 +38,9 @@
       "Bash(pkill -f \"next dev\")",
       "Bash(mkdir:*)",
       "Bash(python -c \"from docx import Document; doc = Document\\('모델별 이미지 텍스트 시험 결과.docx'\\); print\\('\\\\n'.join\\([p.text for p in doc.paragraphs]\\)\\)\")",
-      "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); from docx import Document; import glob; files = glob.glob\\('모델*.docx'\\); doc = Document\\(files[0]\\); [print\\(p.text\\) for p in doc.paragraphs]\")"
+      "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); from docx import Document; import glob; files = glob.glob\\('모델*.docx'\\); doc = Document\\(files[0]\\); [print\\(p.text\\) for p in doc.paragraphs]\")",
+      "WebSearch",
+      "Read(//c/Users/tara0/.claude/**)"
     ]
   }
 }
