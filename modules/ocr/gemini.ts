@@ -128,7 +128,7 @@ const LLAMA_PROMPT = `Analyze this image carefully and describe in the following
    - Mention exact position and size: "At [position] in [size] font: [exact text]"
    - Then read left→right, top→bottom for remaining text
    - Read EVERY word, number, and character you see
-   - IMPORTANT: If text is inside symbols like <>, <<>>, [], {}, these are titles/subtitles - READ the text inside, just don't include the symbols themselves (e.g., "<Title>" → read as "Title")
+   - Remove only decorative symbols: <>, <<>>, [], {} but READ the text inside them
    - If arrows (→, ⇒) or connection lines exist, read connected text together (they are related)
    - If text is vertically adjacent to an image, describe them together (e.g., "dog photo with caption 'cute' directly below")
    - For small text or fine print, read it carefully and mention "in small font: [text]"
