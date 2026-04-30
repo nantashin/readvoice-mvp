@@ -100,49 +100,38 @@ const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로�
 사진 (인물사진, 풍경, 일러스트, 그림, 카드),
 혼합 (문서인데 그림도 있음)`
 
-// llama3.2-vision 전용 프롬프트 (매우 상세한 영문 분석 → 번역)
-const LLAMA_PROMPT = `Analyze this image completely.
+// llama3.2-vision 전용 프롬프트 (항목별 분석 → 번역)
+const LLAMA_PROMPT = `Analyze this image in the following order:
 
-SECTION 0 - START WITH THE LARGEST:
-- Largest image/character/figure first (describe in detail)
-- Largest text/title first (mention size and position: "center-top in large font...")
+0. Start with the largest elements:
+   - Describe the largest image/character/figure first if present
+   - Read the largest text/title first (mention size and position: "center-top in large font...")
 
-SECTION 1 - ALL TEXT (largest→smallest):
-- Center-top title first if present
-- Then left→right, top→bottom
-- Ignore symbols <>, <<>>, [], {} and read only the text inside
-- If arrows (→, ⇒) or connection lines exist, read connected items together
-- If image and text are vertically adjacent, describe together (e.g., "dog photo with text 'cute' below")
+1. All text in image (largest→smallest):
+   - Center-top title first if present
+   - Then left→right, top→bottom order
+   - Ignore symbols <>, <<>>, [], {} and read only the text inside (likely titles/subtitles)
+   - If arrows (→, ⇒) or connection lines exist, read connected items together as they are related
+   - If image and text are vertically adjacent, describe together (e.g., "dog photo with text 'cute' below")
 
-SECTION 2 - MAIN CHARACTER:
-- Face: expression, gaze direction
-- Hair: color, style
-- Clothing: every item, exact colors, patterns
-- Both hands: exactly what each holds
-- Posture: exact body position
-(SKIP this section if no character present)
+2. Main character: Clothing, posture, expression, what both hands are holding
+   (SKIP this item if no character present)
 
-SECTION 3 - OTHER CHARACTERS/ANIMALS:
-Same detail for each. (SKIP if none)
+3. Other characters or animals: Describe in detail if present
+   (SKIP this item if none)
 
-SECTION 4 - OBJECTS:
-Every significant object with position.
+4. Background: Sky, buildings, nature, lighting, colors
 
-SECTION 5 - BACKGROUND:
-Sky, buildings, nature, time of day, colors, lighting.
+5. Overall colors and atmosphere
 
-SECTION 6 - COLORS AND ATMOSPHERE:
-Dominant colors and overall mood.
+6. Image summary: Based on the large title and content above, summarize what this image is about in one sentence
 
-SECTION 7 - IMAGE SUMMARY:
-Based on the large title and content above, summarize what this image is about in one sentence.
-
-Rules:
+Important rules:
 - Connection lines (→, ⇒, arrows, lines) indicate relationships - read connected items together
+- SKIP items where you would answer "none" - don't mention them at all
 - Describe ONLY what is ACTUALLY VISIBLE
 - Never guess or interpret
-- SKIP sections with nothing to describe (don't write "none")
-- Be extremely specific`
+- Be extremely specific and detailed`
 
 function removeEnglishWords(text: string): string {
   return text
