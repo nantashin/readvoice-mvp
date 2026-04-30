@@ -139,7 +139,14 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     onStatusChange("processing")
 
     // 모든 모델 분석 시작 시 BGM 시작 (공통)
+    console.log("[processFile] BGM 시작")
     bgmManager.start()
+
+    // BGM 덕킹 해제 (이전 TTS로 인한 덕킹 해제)
+    setTimeout(() => {
+      bgmManager.unduck()
+      console.log("[processFile] BGM 덕킹 해제")
+    }, 500)
 
     try {
       const result = await analyzeFile(file, modelId as VisionModel, "describe")

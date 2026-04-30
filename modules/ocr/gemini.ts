@@ -20,25 +20,32 @@ const NEEDS_TRANSLATION_MODELS = [
 // 통합 프롬프트 (gemma4:e2b, qwen3.5용)
 const UNIFIED_PROMPT = `이 이미지를 한국어로 분석해줘.
 
+중요: 텍스트 읽기가 최우선 과제야. 모든 글자를 정확히 읽어줘.
+
 0. 먼저 제일 큰 것부터:
    - 가장 큰 이미지나 캐릭터가 있으면 먼저 설명
-   - 가장 큰 글씨(제목)가 있으면 먼저 읽기
+   - 가장 큰 글씨(제목)가 있으면 먼저 읽기 (위치 언급: "화면 중앙 상단에...")
 
-1. 이미지 속 텍스트 (큰 글씨→작은 글씨 순):
-   - 화면 중앙 상단 제목 우선
-   - 이후 왼쪽→오른쪽, 위→아래 순서
-   - <>, <<>>, [], {} 같은 기호는 빼고 안의 텍스트만 읽기
+1. 이미지 속 모든 텍스트 (큰 글씨→작은 글씨 순):
+   중요: 보이는 모든 글자, 숫자, 기호를 정확히 읽어줘.
+
+   - 가장 큰 텍스트(제목)부터 시작. 위치와 크기 언급: "화면 중앙 상단에 큰 글씨로: [텍스트]"
+   - 이후 왼쪽→오른쪽, 위→아래 순서로 모든 텍스트 읽기
+   - <>, <<>>, [], {} 기호 안의 텍스트는 제목/소제목이므로 반드시 읽어줘 (기호만 빼고 내용은 읽기)
    - 화살표(→, ⇒)나 연결선이 있으면 연결된 내용을 이어서 읽기
+   - 작은 글씨도 놓치지 말고: "작은 글씨로: [텍스트]"
+   - 이미지와 겹친 텍스트도 읽기
 
-2. 주요 인물: 의상, 자세, 표정, 양손에 든 것
-3. 주변 인물이나 동물: 있으면 상세히 설명 (없으면 이 항목 생략)
+2. 주요 인물: 의상, 자세, 표정, 양손에 든 것 (없으면 생략)
+3. 주변 인물이나 동물: 상세히 설명 (없으면 생략)
 4. 배경: 하늘, 건물, 자연, 조명 색감
 5. 전체적인 색감과 분위기
 
 6. 이미지 요약: 큰 제목과 위 내용을 바탕으로 이 이미지가 무엇인지 한 문장으로 요약
 
-주의사항:
-- 연계선(→, ⇒, 선)으로 연결된 항목은 관계가 있으므로 연결해서 읽기
+규칙:
+- 텍스트 읽기가 최우선! 모든 글자를 빠짐없이 정확히 읽어줘
+- 연결선으로 연결된 항목은 함께 읽기
 - 이미지와 텍스트가 상하로 붙어있으면 함께 설명
 - "없음"이라고 답할 항목은 아예 건너뛰기
 - 반드시 한국어로만 답해줘. 영어 금지.`
@@ -83,16 +90,22 @@ const OLMOCR2_PROMPT = `이 문서의 모든 텍스트를 순서대로 읽어줘
 한국어로만 답해줘.`
 
 // glm-ocr 전용 프롬프트 (문서 OCR)
-const GLM_OCR_PROMPT = `이 문서의 모든 글자를 순서대로 읽어줘.
+const GLM_OCR_PROMPT = `이 이미지의 모든 글자를 정확히 읽어줘.
+
+중요: 텍스트 읽기가 최우선 과제야. 보이는 모든 글자, 숫자, 기호를 빠짐없이 읽어줘.
 
 순서:
-1. 제일 큰 글씨 먼저 (제목, 위치 언급)
+1. 제일 큰 글씨(제목) 먼저 - 위치와 크기 언급: "화면 중앙 상단에 큰 글씨로: [텍스트]"
 2. 화면 중앙 상단 제목 우선
-3. 왼쪽→오른쪽, 위→아래
-4. <>, <<>>, [], {} 기호는 빼고 안의 텍스트만
-5. 표가 있으면 표 형태 그대로
+3. 이후 왼쪽→오른쪽, 위→아래 순서로 모든 텍스트 읽기
+4. <>, <<>>, [], {} 기호 안의 텍스트는 제목/소제목이므로 반드시 읽어줘 (기호만 빼고 내용은 읽기)
+5. 작은 글씨도 놓치지 말고 읽기: "작은 글씨로: [텍스트]"
+6. 표가 있으면 표 형태 그대로 읽기
+7. 화살표(→, ⇒)나 연결선이 있으면 연결된 내용을 이어서 읽기
 
-한국어로만 답해줘.`
+규칙:
+- 모든 글자를 정확히 읽는 것이 최우선!
+- 한국어로만 답해줘. 영어 금지.`
 
 // 이미지 분류용 프롬프트 (빠른 판단)
 const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로만 답해줘:
@@ -115,7 +128,7 @@ const LLAMA_PROMPT = `Analyze this image carefully and describe in the following
    - Mention exact position and size: "At [position] in [size] font: [exact text]"
    - Then read left→right, top→bottom for remaining text
    - Read EVERY word, number, and character you see
-   - Remove only decorative symbols: <>, <<>>, [], {} but READ the text inside them
+   - IMPORTANT: If text is inside symbols like <>, <<>>, [], {}, these are titles/subtitles - READ the text inside, just don't include the symbols themselves (e.g., "<Title>" → read as "Title")
    - If arrows (→, ⇒) or connection lines exist, read connected text together (they are related)
    - If text is vertically adjacent to an image, describe them together (e.g., "dog photo with caption 'cute' directly below")
    - For small text or fine print, read it carefully and mention "in small font: [text]"
