@@ -12,28 +12,28 @@ import { classifyImage } from "@/modules/ocr/gemini"
 export const IMAGE_MODELS = [
   {
     id: "gemma4:e4b",
-    label: "1. 구글 4G (gemma4 E4B) — 정확하고 빠름 (1분)",
-    tts: "일번. 구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다."
+    label: "구글 4G (gemma4 E4B) — 정확하고 빠름 (1분)",
+    tts: "구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다."
   },
   {
-    id: "qwen3.5:9b",
-    label: "2. 큐쓰리 (qwen3.5:9b) — 가장 정확 (2분)",
-    tts: "이번. 큐쓰리. 가장 정확합니다. 약 2분 걸립니다."
+    id: "qwen3.5:9b-image",
+    label: "큐쓰리 (qwen3.5:9b) — 가장 정확 (2분)",
+    tts: "큐쓰리. 가장 정확합니다. 약 2분 걸립니다."
   },
   {
     id: "gemma4:e2b",
-    label: "3. 구글 2G (gemma4 E2B) — 빠른 분석 (30초)",
-    tts: "삼번. 구글 이기가. 가장 빠릅니다. 약 30초 걸립니다."
+    label: "구글 2G (gemma4 E2B) — 빠른 분석 (30초)",
+    tts: "구글 이기가. 가장 빠릅니다. 약 30초 걸립니다."
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
-    label: "4. 라마비전 (Llama Vision) — 상세 묘사 (1분 30초)",
-    tts: "사번. 라마비전. 상세합니다. 약 1분 30초 걸립니다."
+    label: "라마비전 (Llama Vision) — 상세 묘사 (1분 30초)",
+    tts: "라마비전. 상세합니다. 약 1분 30초 걸립니다."
   },
   {
-    id: "glm-ocr",
-    label: "5. 지엘엠 (GLM-OCR) — 초고속 (10초)",
-    tts: "오번. 지엘엠. 초고속입니다. 약 10초 걸립니다."
+    id: "glm-ocr-image",
+    label: "지엘엠 (GLM-OCR) — 초고속 (10초)",
+    tts: "지엘엠. 초고속입니다. 약 10초 걸립니다."
   }
 ]
 
@@ -41,28 +41,26 @@ export const IMAGE_MODELS = [
 export const DOCUMENT_MODELS = [
   {
     id: "qwen3.5:9b",
-    label: "1. 큐쓰리 (qwen3.5:9b) — 텍스트/문서 최적 (1~2분)",
-    tts: "일번. 큐쓰리. 텍스트와 문서 인식에 최적화되어 있습니다. 약 1분에서 2분 걸립니다."
+    label: "큐쓰리 (qwen3.5:9b) — 텍스트/문서 최적 (1~2분)",
+    tts: "큐쓰리. 텍스트와 문서 인식에 최적화되어 있습니다. 약 1분에서 2분 걸립니다."
   },
   {
     id: "richardyoung/olmocr2:7b-q8",
-    label: "2. 올름오씨알 (olmOCR2) — 표/레이아웃 인식 (2분)",
-    tts: "이번. 올름오씨알. 표와 복잡한 레이아웃 읽기에 강합니다. 약 2분 걸립니다."
+    label: "올름오씨알 (olmOCR2) — 표/레이아웃 인식 (2분)",
+    tts: "올름오씨알. 표와 복잡한 레이아웃 읽기에 강합니다. 약 2분 걸립니다."
   },
   {
     id: "glm-ocr",
-    label: "3. 지엘엠 (GLM-OCR) — 문서 특화 (1~2분)",
-    tts: "삼번. 지엘엠. 문서 읽기에 특화되어 있습니다. 약 1분에서 2분 걸립니다."
-  },
-  {
-    id: "gemma4:e4b",
-    label: "4. 구글 4G (gemma4 E4B) — 균형형 (20~40초)",
-    tts: "사번. 구글 사기가. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    label: "지엘엠 (GLM-OCR) — 문서 특화 (1~2분)",
+    tts: "지엘엠. 문서 읽기에 특화되어 있습니다. 약 1분에서 2분 걸립니다."
   }
 ]
 
-// 전체 모델 (UI 드롭다운용)
-const ALL_MODELS = [...IMAGE_MODELS, ...DOCUMENT_MODELS.filter(m => m.id !== "gemma4:e4b")]
+// 모델 ID 매핑 (UI ID → 실제 모델 ID)
+const MODEL_ID_MAP: Record<string, string> = {
+  "qwen3.5:9b-image": "qwen3.5:9b",
+  "glm-ocr-image": "glm-ocr"
+}
 
 interface FileUploadProps {
   onResult: (text: string) => void  // 다국어 지원 예정: language 파라미터 추가 가능
@@ -133,8 +131,10 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     return () => window.removeEventListener("openFileInput", handleOpenFileInput)
   }, [])
 
-  const processFile = async (file: File, modelId: string) => {
-    console.log("[processFile] 분석 시작 - 모델:", modelId)
+  const processFile = async (file: File, uiModelId: string) => {
+    // UI 모델 ID를 실제 모델 ID로 변환
+    const actualModelId = MODEL_ID_MAP[uiModelId] || uiModelId
+    console.log("[processFile] 분석 시작 - UI 모델:", uiModelId, "→ 실제 모델:", actualModelId)
     setLoading(true)
     onStatusChange("processing")
 
@@ -149,7 +149,7 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     }, 500)
 
     try {
-      const result = await analyzeFile(file, modelId as VisionModel, "describe")
+      const result = await analyzeFile(file, actualModelId as VisionModel, "describe")
 
       if (result.error) {
         setError(result.error)
@@ -215,13 +215,13 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         let message = ""
 
         if (classification === "document") {
-          autoModel = "qwen3.5:9b" // 문서는 큐쓰리로 자동 시작
+          autoModel = "qwen3.5:9b" // 문서는 큐쓰리로 자동 시작 (문서 OCR 모델)
           message = "문서 이미지로 판단했어요. 큐쓰리 모델로 읽어드릴게요."
         } else if (classification === "photo") {
-          autoModel = "gemma4:e2b" // 사진은 구글 이기가로 자동 시작
+          autoModel = "gemma4:e2b" // 사진은 구글 이기가로 자동 시작 (이미지 모델)
           message = "이미지로 판단했어요. 구글 이기가 모델로 설명해 드릴게요."
         } else {
-          // mixed - 기본은 문서로 처리
+          // mixed - 기본은 문서로 처리 (문서 OCR 모델)
           autoModel = "qwen3.5:9b"
           message = "그림과 글자가 함께 있어요. 글자를 먼저 읽어드릴게요."
         }
@@ -284,8 +284,10 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
           }, 1500)
         } else if (data.error === "SCAN_PDF_DETECTED") {
           // 스캔된 PDF - 사용자가 선택한 모델 또는 기본 모델로 실행
+          // UI ID를 실제 모델 ID로 변환
+          const actualModelId = MODEL_ID_MAP[selectedModel] || selectedModel
           const pdfOcrModels = ["qwen3.5:9b", "richardyoung/olmocr2:7b-q8", "glm-ocr", "gemma4:e4b", "llama3.2-vision:11b-instruct-q4_K_M"]
-          const useModel = pdfOcrModels.includes(selectedModel) ? selectedModel : "qwen3.5:9b"
+          const useModel = pdfOcrModels.includes(actualModelId) ? actualModelId : "qwen3.5:9b"
 
           const modelName = useModel === "qwen3.5:9b" ? "큐쓰리" :
                            useModel === "richardyoung/olmocr2:7b-q8" ? "올름오씨알" :
@@ -482,9 +484,11 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
           id="vision-model"
           value={selectedModel}
           onChange={(e) => {
-            const model = e.target.value
-            onModelChange(model)
-            const found = ALL_MODELS.find((m) => m.id === model)
+            const uiModelId = e.target.value
+            onModelChange(uiModelId)
+            const foundImage = IMAGE_MODELS.find((m) => m.id === uiModelId)
+            const foundDoc = DOCUMENT_MODELS.find((m) => m.id === uiModelId)
+            const found = foundImage || foundDoc
             if (found) tts.speak(found.tts)
           }}
           aria-label="분석에 사용할 모델"
@@ -501,14 +505,23 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
             opacity: 1,
           }}
         >
-          {ALL_MODELS.map((model) => (
-            <option key={model.id} value={model.id}>
-              {model.label}
-            </option>
-          ))}
+          <optgroup label="📷 이미지 설명 (사진/그림)">
+            {IMAGE_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </optgroup>
+          <optgroup label="📄 문서 OCR (텍스트 읽기)">
+            {DOCUMENT_MODELS.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <p style={{ color: "#64748B", fontSize: "0.75rem", marginTop: "0.25rem" }}>
-          {ALL_MODELS.find((m) => m.id === selectedModel)?.tts}
+          {IMAGE_MODELS.find((m) => m.id === selectedModel)?.tts || DOCUMENT_MODELS.find((m) => m.id === selectedModel)?.tts}
         </p>
       </div>
 

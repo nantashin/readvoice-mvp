@@ -38,7 +38,6 @@ const DOCUMENT_MODEL_MENU_TTS = `어떤 모델로 읽어 드릴까요?
 일번. 큐쓰리. 텍스트와 문서에 강합니다.
 이번. 올름오씨알. 표와 레이아웃에 강합니다.
 삼번. 지엘엠. 문서 특화 모델입니다.
-사번. 구글 사기가. 빠르고 정확합니다.
 스페이스바를 누르고 번호로 말씀해 주세요.`
 
 const MODEL_MENU_TTS = "어떤 모델로 바꿀까요? 일번, 구글 이기가, 15초에서 20초. 이번, 구글 사기가, 30초에서 40초. 삼번, 라마비전, 2분에서 3분. 사번, 큐쓰리, 30초에서 1분. 오번, 올름오씨알, 1분에서 2분. 육번, 지엘엠, 30초에서 1분. 스페이스바를 누르고 번호로 말씀해 주세요."
@@ -462,7 +461,7 @@ export default function Home() {
           modelId = "gemma4:e4b"
           modelName = "구글 사기가"
         } else if (/이번|2|큐|qwen|q3|큐쓰리/i.test(t)) {
-          modelId = "qwen3.5:9b"
+          modelId = "qwen3.5:9b-image" // 이미지용 UI ID
           modelName = "큐쓰리"
         } else if (/삼번|3|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
           modelId = "gemma4:e2b"
@@ -471,11 +470,11 @@ export default function Home() {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
         } else if (/오번|5|지엘엠|glm/i.test(t)) {
-          modelId = "glm-ocr"
+          modelId = "glm-ocr-image" // 이미지용 UI ID
           modelName = "지엘엠"
         }
       } else if (fileType === "document") {
-        // 문서 모델 (5개 - PDF 스캔본용)
+        // 문서 모델 (4개 - PDF 스캔본용)
         if (/일번|1|큐|qwen|q3|큐쓰리/i.test(t)) {
           modelId = "qwen3.5:9b"
           modelName = "큐쓰리"
@@ -488,9 +487,6 @@ export default function Home() {
         } else if (/사번|4|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
           modelName = "구글 사기가"
-        } else if (/오번|5|라마|llama|비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
         }
       } else {
         // fileType이 설정되지 않은 경우 (6개 모델)
@@ -526,7 +522,7 @@ export default function Home() {
         })
         setMicState("processing")
       } else {
-        const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "오번" : "육번"
+        const maxNum = fileType === "image" ? "오번" : fileType === "document" ? "삼번" : "육번"
         speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`)
         const delay = (35 / 10) * 1000 / speechRate + 500
         setTimeout(() => {
