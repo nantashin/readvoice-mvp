@@ -9,7 +9,8 @@ import ResponseDisplay from "@/app/components/ResponseDisplay"
 import { bgmManager } from "@/lib/audio/bgm-manager"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "ask_original"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image"
+// 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
 
 const INTRO_TTS = `안녕하세요! READ VOICE Pro예요.
@@ -26,9 +27,11 @@ const MAIN_MENU_TTS = `어떻게 도와드릴까요?
 스페이스바를 누르고 번호나 원하시는 걸 말씀해 주세요.`
 
 const IMAGE_MODEL_MENU_TTS = `어떤 모델로 설명해 드릴까요?
-일번. 구글 이기가. 가장 빠릅니다.
-이번. 구글 사기가. 빠르고 정확합니다.
-삼번. 라마비전. 가장 상세합니다.
+일번. 구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다.
+이번. 큐쓰리. 가장 정확합니다. 약 2분 걸립니다.
+삼번. 구글 이기가. 가장 빠릅니다. 약 30초 걸립니다.
+사번. 라마비전. 상세합니다. 약 1분 30초 걸립니다.
+오번. 지엘엠. 초고속입니다. 약 10초 걸립니다.
 스페이스바를 누르고 번호로 말씀해 주세요.`
 
 const DOCUMENT_MODEL_MENU_TTS = `어떤 모델로 읽어 드릴까요?
@@ -59,10 +62,10 @@ export default function Home() {
   const [response, setResponse] = useState("")
   const [history, setHistory] = useState<{ role: string; content: string }[]>([])
   const [speechRate, setSpeechRate] = useState<number>(1.0)
-  const [selectedModel, setSelectedModel] = useState<string>("gemma4:e2b")
+  const [selectedModel, setSelectedModel] = useState<string>("gemma4:e4b")
   const [pendingFile, setPendingFile] = useState<File | null>(null)
   const [pendingAction, setPendingAction] = useState<string>("")
-  const [originalText, setOriginalText] = useState<string>("")
+  // 다국어 지원 예정: const [selectedLanguage, setSelectedLanguage] = useState<string>("ko")
   const [lastResponse, setLastResponse] = useState<string>("")
   const [previousMenuState, setPreviousMenuState] = useState<MenuState>("idle")
   const [fileType, setFileType] = useState<FileType>(null)
@@ -454,16 +457,22 @@ export default function Home() {
 
       // fileType에 따라 다른 모델 매핑
       if (fileType === "image") {
-        // 이미지 모델 (3개)
-        if (/일번|1|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 이기가"
-        } else if (/이번|2|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
+        // 이미지 모델 (5개)
+        if (/일번|1|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
           modelId = "gemma4:e4b"
           modelName = "구글 사기가"
-        } else if (/삼번|3|라마|llama|비전/i.test(t)) {
+        } else if (/이번|2|큐|qwen|q3|큐쓰리/i.test(t)) {
+          modelId = "qwen3.5:9b"
+          modelName = "큐쓰리"
+        } else if (/삼번|3|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
+          modelId = "gemma4:e2b"
+          modelName = "구글 이기가"
+        } else if (/사번|4|라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
+        } else if (/오번|5|지엘엠|glm/i.test(t)) {
+          modelId = "glm-ocr"
+          modelName = "지엘엠"
         }
       } else if (fileType === "document") {
         // 문서 모델 (5개 - PDF 스캔본용)
@@ -555,45 +564,8 @@ export default function Home() {
       return
     }
 
-    // 원문 듣기 확인 대기 중
-    if (currentMenu === "ask_original") {
-      if (/그래|좋아|네|예|맞아|들려|듣고|원해/.test(t)) {
-        setMicState("speaking")
-        speak("원문을 들려드릴게요.")
-        setTimeout(() => {
-          // 영어로 원문 읽기
-          const utt = new SpeechSynthesisUtterance(originalText)
-          utt.lang = "en-US"  // 영어 음성
-          utt.rate = speechRate
-          utt.pitch = 1.0
-          utt.onend = () => {
-            speak("원문 듣기가 끝났어요.")
-            setTimeout(() => {
-              setMenuState("idle")
-              setMicState("off")
-            }, 1500)
-          }
-          window.speechSynthesis.speak(utt)
-        }, 1500)
-        return
-      }
-      if (/아니|취소|싫어|말고|괜찮|됐/.test(t)) {
-        speak("알겠어요. 끝났어요.")
-        setTimeout(() => {
-          setMenuState("idle")
-          setMicState("off")
-        }, 1500)
-        return
-      }
-      // 네/아니오가 아닌 경우
-      speak("네 또는 아니오로 말씀해 주세요.")
-      const delay = (18 / 10) * 1000 / speechRate + 500
-      setTimeout(() => {
-        setMicState("off")
-        startListening()
-      }, delay)
-      return
-    }
+    // 다국어 지원 예정: language_select 메뉴 처리 로직 추가 가능
+    // if (currentMenu === "language_select") { ... }
 
     // 일반 상태 - 의도 파악
     const intent = await detectIntent(transcript)
@@ -1057,39 +1029,25 @@ export default function Home() {
             📄 파일에서 텍스트 읽기 (이미지 / PDF)
           </p>
           <FileUpload
-            onResult={(text, original) => {
+            onResult={(text) => {
               // BGM 중지
               console.log("[onResult] 분석 완료, BGM 중지")
               bgmManager.stop()
               setResponse(text)
               setMicState("speaking")
 
-              // 영문 원본이 있으면 저장
-              if (original) {
-                setOriginalText(original)
-              }
+              // 다국어 지원 예정: 언어 선택에 따라 TTS 언어 변경 가능
 
               // 분석 완료 안내 → 결과 읽기 → 후속 안내 (onEnd 콜백으로 연결)
               tts.speak("분석이 끝났어요! 읽어드릴게요.", speechRate, () => {
                 // 결과 텍스트 읽기
                 tts.speak(text, speechRate, () => {
-                  // 텍스트 읽기가 끝난 후
-                  if (original && original.length > 10) {
-                    // 원문이 있으면 원문 듣기 제안
-                    const askMsg = "원문도 들으시겠어요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요."
-                    setMenuState("ask_original")
-                    tts.speak(askMsg, speechRate, () => {
-                      setMicState("off")
-                      startListening()
-                    })
-                  } else {
-                    // 원문이 없으면 다른 모델 선택 안내
-                    const msg = "다른 모델로도 분석 가능합니다. 모델을 바꾸시려면 '모델 바꿔'라고 말씀해 주세요."
-                    tts.speak(msg, speechRate, () => {
-                      setMicState("off")
-                      setMenuState("idle")
-                    })
-                  }
+                  // 텍스트 읽기가 끝난 후 - 다른 모델 선택 안내
+                  const msg = "다른 모델로도 분석 가능합니다. 모델을 바꾸시려면 '모델 바꿔'라고 말씀해 주세요."
+                  tts.speak(msg, speechRate, () => {
+                    setMicState("off")
+                    setMenuState("idle")
+                  })
                 })
               })
             }}

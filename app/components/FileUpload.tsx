@@ -8,22 +8,32 @@ import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
 import { bgmManager } from "@/lib/audio/bgm-manager"
 import { classifyImage } from "@/modules/ocr/gemini"
 
-// 이미지 설명용 모델 (3개)
+// 이미지 설명용 모델 (5개) - 정확도 순: Q3 > Gemma4:4G > Llama > Gemma4:2G > GLM
 export const IMAGE_MODELS = [
   {
-    id: "gemma4:e2b",
-    label: "1. 구글 2G (gemma4 E2B) — 빠른 분석 (5~20초)",
-    tts: "일번. 구글 이기가. 가장 빠릅니다. 약 5초에서 20초 걸립니다."
+    id: "gemma4:e4b",
+    label: "1. 구글 4G (gemma4 E4B) — 정확하고 빠름 (1분)",
+    tts: "일번. 구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다."
   },
   {
-    id: "gemma4:e4b",
-    label: "2. 구글 4G (gemma4 E4B) — 균형 (20~40초)",
-    tts: "이번. 구글 사기가. 빠르고 정확합니다. 약 20초에서 40초 걸립니다."
+    id: "qwen3.5:9b",
+    label: "2. 큐쓰리 (qwen3.5:9b) — 가장 정확 (2분)",
+    tts: "이번. 큐쓰리. 가장 정확합니다. 약 2분 걸립니다."
+  },
+  {
+    id: "gemma4:e2b",
+    label: "3. 구글 2G (gemma4 E2B) — 빠른 분석 (30초)",
+    tts: "삼번. 구글 이기가. 가장 빠릅니다. 약 30초 걸립니다."
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
-    label: "3. 라마비전 (Llama Vision) — 상세 묘사 (2~3분)",
-    tts: "삼번. 라마비전. 가장 상세합니다. 약 2분에서 3분 걸립니다."
+    label: "4. 라마비전 (Llama Vision) — 상세 묘사 (1분 30초)",
+    tts: "사번. 라마비전. 상세합니다. 약 1분 30초 걸립니다."
+  },
+  {
+    id: "glm-ocr",
+    label: "5. 지엘엠 (GLM-OCR) — 초고속 (10초)",
+    tts: "오번. 지엘엠. 초고속입니다. 약 10초 걸립니다."
   }
 ]
 
@@ -55,7 +65,7 @@ export const DOCUMENT_MODELS = [
 const ALL_MODELS = [...IMAGE_MODELS, ...DOCUMENT_MODELS.filter(m => m.id !== "gemma4:e4b")]
 
 interface FileUploadProps {
-  onResult: (text: string, original?: string) => void
+  onResult: (text: string) => void  // 다국어 지원 예정: language 파라미터 추가 가능
   onStatusChange: (status: "idle" | "processing" | "speaking") => void
   selectedModel: string
   onModelChange: (modelId: string) => void
@@ -141,8 +151,9 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         return
       }
 
-      // 분석 완료 - 한국어 번역과 영문 원본을 함께 전달
-      onResult(result.text, result.original)
+      // 분석 완료 - 한국어 결과 전달
+      // 다국어 지원 예정: result.language에 따라 다른 처리 가능
+      onResult(result.text)
       onStatusChange("speaking")
     } catch {
       const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
