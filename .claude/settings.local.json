@@ -35,7 +35,8 @@
       "Bash(rm -f new-daily-report.ps1 extract_script.py check_end.py content_end.txt after_script.txt six_ticks.txt)",
       "Bash(claude logout:*)",
       "Bash(netstat -ano)",
-      "Bash(pkill -f \"next dev\")"
+      "Bash(pkill -f \"next dev\")",
+      "Bash(mkdir:*)"
     ]
   }
 }
