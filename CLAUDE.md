@@ -322,7 +322,7 @@ NEXT_PUBLIC_APP_NAME=READ VOICE Pro
 
 ---
 
-**현재 버전:** v2.7.1  
+**현재 버전:** v2.7.2  
 **마지막 업데이트:** 2026-04-30  
 **Phase:** Phase 2 (OCR/Vision)  
-**주요 변경:** 모델 순서 재배치 (정확도 우선), 원문듣기 제거, 라마비전 존댓말 변환
+**주요 변경:** 라마비전 텍스트 읽기 능력 대폭 강화 (TEXT READING PRIORITY)
