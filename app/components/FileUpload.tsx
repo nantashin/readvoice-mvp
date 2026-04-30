@@ -12,28 +12,28 @@ import { classifyImage } from "@/modules/ocr/gemini"
 export const IMAGE_MODELS = [
   {
     id: "gemma4:e4b",
-    label: "구글 4G (gemma4 E4B) — 정확하고 빠름 (1분)",
-    tts: "구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다."
+    label: "1번. 구글 사기가 (gemma4 E4B) — 정확하고 빠름 (1분)",
+    tts: "일번. 구글 사기가. 정확하고 빠릅니다. 약 1분 걸립니다."
   },
   {
     id: "qwen3.5:9b-image",
-    label: "큐쓰리 (qwen3.5:9b) — 가장 정확 (2분)",
-    tts: "큐쓰리. 가장 정확합니다. 약 2분 걸립니다."
+    label: "2번. 큐쓰리 (qwen3.5:9b) — 가장 정확 (2분)",
+    tts: "이번. 큐쓰리. 가장 정확합니다. 약 2분 걸립니다."
   },
   {
     id: "gemma4:e2b",
-    label: "구글 2G (gemma4 E2B) — 빠른 분석 (30초)",
-    tts: "구글 이기가. 가장 빠릅니다. 약 30초 걸립니다."
+    label: "3번. 구글 이기가 (gemma4 E2B) — 가장 빠름 (30초)",
+    tts: "삼번. 구글 이기가. 가장 빠릅니다. 약 30초 걸립니다."
   },
   {
     id: "llama3.2-vision:11b-instruct-q4_K_M",
-    label: "라마비전 (Llama Vision) — 상세 묘사 (1분 30초)",
-    tts: "라마비전. 상세합니다. 약 1분 30초 걸립니다."
+    label: "4번. 라마비전 (Llama Vision) — 상세 묘사 (1분 30초)",
+    tts: "사번. 라마비전. 상세합니다. 약 1분 30초 걸립니다."
   },
   {
     id: "glm-ocr-image",
-    label: "지엘엠 (GLM-OCR) — 초고속 (10초)",
-    tts: "지엘엠. 초고속입니다. 약 10초 걸립니다."
+    label: "5번. 지엘엠 (GLM-OCR) — 초고속 (10초)",
+    tts: "오번. 지엘엠. 초고속입니다. 약 10초 걸립니다."
   }
 ]
 
@@ -41,18 +41,18 @@ export const IMAGE_MODELS = [
 export const DOCUMENT_MODELS = [
   {
     id: "qwen3.5:9b",
-    label: "큐쓰리 (qwen3.5:9b) — 텍스트/문서 최적 (1~2분)",
-    tts: "큐쓰리. 텍스트와 문서 인식에 최적화되어 있습니다. 약 1분에서 2분 걸립니다."
+    label: "1번. 큐쓰리 (qwen3.5:9b) — 텍스트/문서 최적 (1~2분)",
+    tts: "일번. 큐쓰리. 텍스트와 문서에 강합니다. 약 1분에서 2분 걸립니다."
   },
   {
     id: "richardyoung/olmocr2:7b-q8",
-    label: "올름오씨알 (olmOCR2) — 표/레이아웃 인식 (2분)",
-    tts: "올름오씨알. 표와 복잡한 레이아웃 읽기에 강합니다. 약 2분 걸립니다."
+    label: "2번. 올름오씨알 (olmOCR2) — 표/레이아웃 인식 (2분)",
+    tts: "이번. 올름오씨알. 표와 레이아웃에 강합니다. 약 2분 걸립니다."
   },
   {
     id: "glm-ocr",
-    label: "지엘엠 (GLM-OCR) — 문서 특화 (1~2분)",
-    tts: "지엘엠. 문서 읽기에 특화되어 있습니다. 약 1분에서 2분 걸립니다."
+    label: "3번. 지엘엠 (GLM-OCR) — 문서 특화 (1~2분)",
+    tts: "삼번. 지엘엠. 문서 특화 모델입니다. 약 1분에서 2분 걸립니다."
   }
 ]
 

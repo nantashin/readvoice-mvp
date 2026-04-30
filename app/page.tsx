@@ -223,24 +223,30 @@ export default function Home() {
       const { file, classification } = event.detail
       setPendingFile(file)
 
-      // classification에 따라 fileType 설정
+      // classification에 따라 fileType 설정 및 적절한 메뉴 TTS
+      let menuTTS = ""
       if (classification === "document") {
         setFileType("document")
+        menuTTS = DOCUMENT_MODEL_MENU_TTS
       } else {
         setFileType("image")
+        menuTTS = IMAGE_MODEL_MENU_TTS
       }
 
-      // 모델 선택 메뉴로 전환 (사용자가 모델 선택 가능하도록)
+      // 모델 선택 메뉴로 전환
       setMenuState("model_select")
-      setMicState("off")
+      setMicState("speaking")
 
-      // 마이크 대기
-      setTimeout(() => startListening(), 500)
+      // 모델 메뉴 TTS 읽기
+      speak(menuTTS, speechRate, 1.7, () => {
+        setMicState("off")
+        startListening()
+      })
     }
 
     window.addEventListener("imageClassified", handleImageClassified as EventListener)
     return () => window.removeEventListener("imageClassified", handleImageClassified as EventListener)
-  }, [startListening])
+  }, [startListening, speak, speechRate])
 
   // pdfScannedSelected 이벤트 수신
   useEffect(() => {
@@ -481,56 +487,95 @@ export default function Home() {
 
       // fileType에 따라 다른 모델 매핑
       if (fileType === "image") {
-        // 이미지 모델 (5개)
-        if (/일번|1|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 사기가"
-        } else if (/이번|2|큐|qwen|q3|큐쓰리/i.test(t)) {
-          modelId = "qwen3.5:9b-image" // 이미지용 UI ID
-          modelName = "큐쓰리"
-        } else if (/삼번|3|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 이기가"
-        } else if (/사번|4|라마|llama|비전/i.test(t)) {
+        // 이미지 모델 (5개) - 모델명 우선 매칭, 그 다음 번호
+        if (/라마|llama|비전/i.test(t)) {
           modelId = "llama3.2-vision:11b-instruct-q4_K_M"
           modelName = "라마비전"
-        } else if (/오번|5|지엘엠|glm/i.test(t)) {
+        } else if (/큐|qwen|q3|큐쓰리/i.test(t)) {
+          modelId = "qwen3.5:9b-image" // 이미지용 UI ID
+          modelName = "큐쓰리"
+        } else if (/구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
+          modelId = "gemma4:e4b"
+          modelName = "구글 사기가"
+        } else if (/구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
+          modelId = "gemma4:e2b"
+          modelName = "구글 이기가"
+        } else if (/지엘엠|glm/i.test(t)) {
           modelId = "glm-ocr-image" // 이미지용 UI ID
+          modelName = "지엘엠"
+        } else if (/일번|1/i.test(t)) {
+          modelId = "gemma4:e4b"
+          modelName = "구글 사기가"
+        } else if (/이번|2/i.test(t)) {
+          modelId = "qwen3.5:9b-image"
+          modelName = "큐쓰리"
+        } else if (/삼번|3/i.test(t)) {
+          modelId = "gemma4:e2b"
+          modelName = "구글 이기가"
+        } else if (/사번|4/i.test(t)) {
+          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+          modelName = "라마비전"
+        } else if (/오번|5/i.test(t)) {
+          modelId = "glm-ocr-image"
           modelName = "지엘엠"
         }
       } else if (fileType === "document") {
-        // 문서 모델 (4개 - PDF 스캔본용)
-        if (/일번|1|큐|qwen|q3|큐쓰리/i.test(t)) {
+        // 문서 모델 (3개) - 모델명 우선 매칭, 그 다음 번호
+        if (/큐|qwen|q3|큐쓰리/i.test(t)) {
           modelId = "qwen3.5:9b"
           modelName = "큐쓰리"
-        } else if (/이번|2|올름|olmocr|올름오씨알/i.test(t)) {
+        } else if (/올름|olmocr|올름오씨알/i.test(t)) {
           modelId = "richardyoung/olmocr2:7b-q8"
           modelName = "올름오씨알"
-        } else if (/삼번|3|지엘엠|glm/i.test(t)) {
+        } else if (/지엘엠|glm/i.test(t)) {
           modelId = "glm-ocr"
           modelName = "지엘엠"
-        } else if (/사번|4|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 사기가"
-        }
-      } else {
-        // fileType이 설정되지 않은 경우 (6개 모델)
-        if (/일번|1|구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 이기가"
-        } else if (/이번|2|구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 사기가"
-        } else if (/삼번|3|라마|llama|비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        } else if (/사번|4|큐|qwen|q3|큐쓰리/i.test(t)) {
+        } else if (/일번|1/i.test(t)) {
           modelId = "qwen3.5:9b"
           modelName = "큐쓰리"
-        } else if (/오번|5|올름|olmocr|올름오씨알/i.test(t)) {
+        } else if (/이번|2/i.test(t)) {
           modelId = "richardyoung/olmocr2:7b-q8"
           modelName = "올름오씨알"
-        } else if (/육번|6|지엘엠|glm/i.test(t)) {
+        } else if (/삼번|3/i.test(t)) {
+          modelId = "glm-ocr"
+          modelName = "지엘엠"
+        }
+      } else {
+        // fileType이 설정되지 않은 경우 - 모델명 우선 매칭
+        if (/라마|llama|비전/i.test(t)) {
+          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+          modelName = "라마비전"
+        } else if (/큐|qwen|q3|큐쓰리/i.test(t)) {
+          modelId = "qwen3.5:9b"
+          modelName = "큐쓰리"
+        } else if (/구글.?사기가|사기가|구글.?4|gemma.*e4b/i.test(t)) {
+          modelId = "gemma4:e4b"
+          modelName = "구글 사기가"
+        } else if (/구글.?이기가|이기가|구글.?2|gemma.*e2b/i.test(t)) {
+          modelId = "gemma4:e2b"
+          modelName = "구글 이기가"
+        } else if (/올름|olmocr|올름오씨알/i.test(t)) {
+          modelId = "richardyoung/olmocr2:7b-q8"
+          modelName = "올름오씨알"
+        } else if (/지엘엠|glm/i.test(t)) {
+          modelId = "glm-ocr"
+          modelName = "지엘엠"
+        } else if (/일번|1/i.test(t)) {
+          modelId = "gemma4:e2b"
+          modelName = "구글 이기가"
+        } else if (/이번|2/i.test(t)) {
+          modelId = "gemma4:e4b"
+          modelName = "구글 사기가"
+        } else if (/삼번|3/i.test(t)) {
+          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
+          modelName = "라마비전"
+        } else if (/사번|4/i.test(t)) {
+          modelId = "qwen3.5:9b"
+          modelName = "큐쓰리"
+        } else if (/오번|5/i.test(t)) {
+          modelId = "richardyoung/olmocr2:7b-q8"
+          modelName = "올름오씨알"
+        } else if (/육번|6/i.test(t)) {
           modelId = "glm-ocr"
           modelName = "지엘엠"
         }
