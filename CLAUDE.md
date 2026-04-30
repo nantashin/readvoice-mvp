@@ -72,6 +72,10 @@
 - 스크린 리더 호환성 필수
 - role, aria-live, aria-hidden 적절히 사용
 - 시각적 정보에 텍스트 대체 제공
+- **CRITICAL: 프롬프트나 UI에서 "시각장애인", "blind person", "visually impaired" 등 장애 언급 절대 금지**
+  - ❌ "시각장애인을 위해 상세히 설명"
+  - ✅ "듣는 사람이 이해할 수 있도록 상세히 설명"
+  - 이유: 사용자에게 장애를 환기시키는 것은 patronizing하고 실례임
 
 ### 코드 품질
 - **SOLID 원칙:** Single Responsibility, Open/Closed, Liskov, Interface Segregation, Dependency Inversion

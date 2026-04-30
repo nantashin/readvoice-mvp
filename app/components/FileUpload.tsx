@@ -459,12 +459,12 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
     return () => clearTimeout(timer)
   }, [cameraMode])
 
-  // 모델 변경 시 자동 재분석
-  useEffect(() => {
-    if (uploadedFile && !loading && selectedModel) {
-      processFile(uploadedFile, selectedModel)
-    }
-  }, [selectedModel])
+  // 모델 변경 시 자동 재분석 제거 (사용자가 명시적으로 실행해야 함)
+  // useEffect(() => {
+  //   if (uploadedFile && !loading && selectedModel) {
+  //     processFile(uploadedFile, selectedModel)
+  //   }
+  // }, [selectedModel])
 
   return (
     <div style={{ width: "100%", maxWidth: "600px" }}>
