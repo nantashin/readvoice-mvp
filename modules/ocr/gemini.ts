@@ -139,63 +139,104 @@ const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로�
 사진 (인물사진, 풍경, 일러스트, 그림, 카드),
 혼합 (문서인데 그림도 있음)`
 
-// llama3.2-vision 전용 프롬프트 (텍스트 우선 + 시각장애인 목표 → 번역)
-const LLAMA_PROMPT = `Analyze this image carefully and describe in the following order.
+// llama3.2-vision 전용 프롬프트 (이미지-텍스트 관계 중심 재구성)
+const LLAMA_PROMPT = `Analyze this image with focus on IMAGE-TEXT RELATIONSHIPS.
 
-CORE GOAL: Describe so clearly that a blind person can mentally draw this entire image from your words.
+CORE GOAL: A blind person should understand WHAT this image is about by hearing how images and text work together.
 
-IMPORTANT: Text reading is the TOP PRIORITY. Read ALL visible text accurately.
+CRITICAL: Understand the ROLE of each text (title/subtitle/caption/dialogue/annotation/relationship) by analyzing its SIZE, POSITION, COLOR, and SHAPE.
 
-0. Start with the largest elements first:
-   - If there is a largest image/character/figure, describe it first in detail
-   - If there is largest text/title, read it first and mention its size and exact position (e.g., "center-top in very large font...")
+0. First, identify the MAIN SUBJECT and LARGEST TEXT:
+   • Largest text (usually center-top): Read it → this is likely the TITLE or MAIN TOPIC
+   • Largest image/character: Describe briefly → this is the MAIN SUBJECT
 
-1. All text in image (READ CAREFULLY - largest text→smallest text):
-   IMPORTANT: Read ALL visible text, letters, numbers, and symbols accurately.
+1. TEXT ANALYSIS (MOST IMPORTANT - identify the ROLE of each text):
 
-   Reading order:
-   - Start with the LARGEST text (title/heading) at center-top if present
-   - Mention exact position and size: "At [position] in [size] font: [exact text]"
-   - Then read left→right, top→bottom for remaining text
-   - For EACH text, mention which image it's next to/above/below
-   - Read EVERY word, number, and character you see
-   - Remove only decorative symbols: <>, <<>>, [], {} but READ the text inside them
-   - If arrows (→, ⇒) or connection lines exist, read connected text together (they are related)
-   - If text is vertically adjacent to an image, describe them together (e.g., "dog photo with caption 'cute' directly below")
-   - For small text or fine print, read it carefully and mention "in small font: [text]"
-   - If text overlaps images, read it and note the overlap
+   For EACH text you see, determine its ROLE by:
+   • SIZE: Larger = title/heading, Medium = subtitle/label, Small = caption/annotation/source
+   • POSITION: Top = title, Next to image = caption/label, Bottom = source/copyright
+   • COLOR: Different color = emphasis/category distinction
+   • SHAPE/STYLE: Bold = important, Italics = quote/dialogue, Parentheses = explanation
 
-2. Main character/image (if present):
-   - Describe in extreme detail: clothing, posture, facial expression, what hands are holding, colors, position
-   - Then describe from center outward like ripples: nearby characters before distant ones
-   (SKIP this entire item if no character is present)
+   A. Title/Main Topic (largest text, usually top):
+   • Read the text: "[exact text]"
+   • Position: [center-top / top-left / etc.]
+   • Size: [very large / large]
 
-3. Other characters or animals (if present):
-   - Describe each character's position and features in detail
-   - Mention their position relative to other characters
-   (SKIP this entire item if none present)
+   B. Legend/Category Labels (if present):
+   • These explain symbols, colors, or categories
+   • Example: "Male Character", "Female Character", "(무) = military rank"
+   • List all legend items
 
-4. Background elements:
-   - Sky, buildings, nature
-   - Lighting and time of day
-   - Background colors
+   C. Text-Image Pairs (CRITICAL - connect text to its related image):
+   For EACH major element, describe in this format:
 
-5. Overall colors and atmosphere:
-   - Dominant colors throughout the image
-   - Overall mood and feeling
+   • [Position]:
+     - IMAGE: [describe the image/photo/character]
+     - TEXT above/below/next to it: "[exact text]"
+     - TEXT ROLE: [name/label / age/info / title/occupation / caption]
+     - How they relate: [The text labels this image / The image illustrates this caption / etc.]
 
-6. Image summary:
-   - Based on the large title/heading and all content above
-   - Summarize what this image is about in one clear sentence
+   Example format:
+   • Center-top:
+     - IMAGE: Portrait photo of man in black armor holding sword
+     - TEXT directly below: "장보고 30s"
+     - Additional TEXT: "(무)장군 청해진 대사"
+     - TEXT ROLE: Name + age, title + occupation
+     - Relationship: These texts IDENTIFY and DESCRIBE this character
+
+   D. Connection/Relationship Indicators:
+   • Lines, arrows (→, ⇒, ↔) connecting elements
+   • Text on or near connections: Read them → these show RELATIONSHIPS
+   • Example: "Character A ↔ Character B: 父女 (father-daughter)"
+
+   E. Explanatory Text (annotations, footnotes):
+   • Small text that explains symbols, abbreviations, or provides context
+   • Position: [usually corners or margins]
+   • Content: "[exact text]"
+   • Purpose: [explains color codes / defines abbreviations / etc.]
+
+   F. Source/Copyright (smallest text, usually bottom):
+   • Read it: "[exact text]"
+   • This indicates the SOURCE or CREATOR
+
+2. IMAGE DESCRIPTIONS (organized by importance):
+
+   For EACH major image, describe:
+   • Position: [upper-left / center / lower-right / etc.]
+   • What it shows: [person/object/scene]
+   • Visual details: clothing, colors, posture, expression, objects held
+   • Related text: "[the text next to/above/below this image]"
+   • Background: color, pattern, or special effects
+
+   Describe from MAIN subject → SUPPORTING subjects → BACKGROUND elements
+
+3. LAYOUT & COMPOSITION:
+
+   • How are images and text arranged? [grid / hierarchy / flowchart / scattered]
+   • Text-to-image ratio: [mostly text / mostly images / balanced mix]
+   • Color coding system: [e.g., "blue boxes = male, pink = female, gold = royalty"]
+   • Grouping: [are elements grouped by color/position/lines?]
+
+4. OVERALL COLORS & ATMOSPHERE:
+
+   • Dominant colors
+   • Style: [formal diagram / artistic poster / photograph / illustration]
+   • Mood: [serious / playful / educational / dramatic]
+
+5. IMAGE SUMMARY:
+
+   Based on the TITLE, TEXT ROLES, and IMAGE-TEXT RELATIONSHIPS, explain:
+   "This image is a [type] that shows [main subject]. The large title '[title]' indicates [topic]. The images show [description], and the text provides [names/labels/explanations/relationships]. This helps the viewer understand [overall purpose]."
 
 CRITICAL RULES:
-- TEXT READING IS TOP PRIORITY: Read ALL visible text accurately, don't skip any words
-- Describe so a blind person can mentally draw this image - mention positions and spatial relationships
-- Connection lines (→, ⇒, arrows, lines) = related content, read together
-- SKIP items where you would say "none" - omit that section entirely
-- Describe ONLY what is ACTUALLY VISIBLE, never guess or interpret
-- Be extremely specific and detailed, especially for text
-- For text, always mention position and relative size`
+- ROLE IDENTIFICATION: For EVERY text, identify if it's a title/subtitle/label/caption/dialogue/annotation/source
+- SIZE MATTERS: Larger text = more important (title/heading), smaller = supporting info
+- POSITION MATTERS: Text position tells you its purpose (top = title, next to image = label, bottom = source)
+- IMAGE-TEXT PAIRS: Always connect related text and image together
+- COLOR/STYLE: Note if text color/style indicates category or emphasis
+- RELATIONSHIPS: Explicitly describe how images and text work together
+- NO GUESSING: Only describe what is VISIBLE`
 
 function removeEnglishWords(text: string): string {
   return text
