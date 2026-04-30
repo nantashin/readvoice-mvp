@@ -196,7 +196,20 @@ export function cleanForTTS(text: string): string {
     processed = processed.replace(new RegExp(token, 'g'), value)
   })
 
-  // 7. 특수기호 정리 및 마무리
+  // 7. "없음"/"없습니다" 포함 항목 제거
+  const filteredLines = processed.split('\n').filter(line => {
+    const trimmed = line.trim()
+    // 빈 줄은 유지
+    if (!trimmed) return true
+    // "없음", "없습니다", "없어요" 등이 포함된 줄은 제거
+    if (/없음|없습니다|없어요|없네요|보이지 않음|보이지 않습니다/.test(trimmed)) {
+      return false
+    }
+    return true
+  })
+  processed = filteredLines.join('\n')
+
+  // 8. 특수기호 정리 및 마무리
   processed = processed
     .replace(/[|]{2,}/g, '')       // 표 구분선
     .replace(/\|/g, ', ')          // 표 셀 구분
@@ -339,7 +352,7 @@ function speakWithPauses(
       } else if (nextChar?.match(/[?？]/)) {
         setTimeout(speakNext, 500)  // 물음표: 500ms
       } else if (nextChar?.match(/[,，]/)) {
-        setTimeout(speakNext, 150)  // 쉼표: 150ms
+        setTimeout(speakNext, 100)  // 쉼표: 100ms (더 짧게)
       } else if (nextChar?.match(/[:：]/)) {
         setTimeout(speakNext, 200)  // 콜론: 200ms
       } else {

@@ -510,21 +510,12 @@ export default function Home() {
         setSelectedModel(modelId)
         setPendingAction(`model:${modelId}`)
 
-        let confirmMsg = ""
-        if (modelId === "llama3.2-vision:11b-instruct-q4_K_M") {
-          confirmMsg = `${modelName}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
-        } else {
-          confirmMsg = `${modelName}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
-        }
-
-        speak(confirmMsg)
-        setMenuState("confirm")
-
-        const delay = (confirmMsg.length / 10) * 1000 / speechRate + 1000
-        setTimeout(() => {
-          setMicState("off")
-          startListening()
-        }, delay)
+        // 확인 단계 건너뛰고 바로 분석 시작
+        const startMsg = `${modelName}으로 분석을 시작할게요.`
+        speak(startMsg, speechRate, 1.7, () => {
+          executeCurrentAction()
+        })
+        setMicState("processing")
       } else {
         const maxNum = fileType === "image" ? "삼번" : fileType === "document" ? "오번" : "육번"
         speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`)

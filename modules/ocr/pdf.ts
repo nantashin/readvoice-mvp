@@ -9,6 +9,8 @@ const MODEL_TIMEOUTS: Record<string, number> = {
   "gemma4:e2b": 120000,       // 2분
   "gemma4:e4b": 180000,       // 3분
   "qwen3.5:9b": 600000,       // 10분
+  "richardyoung/olmocr2:7b-q8": 180000,  // 3분
+  "glm-ocr": 180000,          // 3분
   "llama3.2-vision:11b-instruct-q4_K_M": 600000,  // 10분
 }
 
@@ -17,7 +19,9 @@ const SUPPORTED_VISION_MODELS = [
   "gemma4:e2b",
   "gemma4:e4b",
   "llama3.2-vision:11b-instruct-q4_K_M",
-  "qwen3.5:9b"
+  "qwen3.5:9b",
+  "richardyoung/olmocr2:7b-q8",
+  "glm-ocr"
 ]
 
 function extractRawText(buffer: Buffer): string {
@@ -231,7 +235,7 @@ export async function extractTextFromPDF(
 
         // Step 4: Vision 모델로 교정 (강화된 이미지 사용)
         if (!selectedModel || !SUPPORTED_VISION_MODELS.includes(selectedModel)) {
-          throw new Error("지원하지 않는 모델입니다. gemma4:e2b, gemma4:e4b, llama3.2-vision, qwen3.5:9b 중 선택해주세요.")
+          throw new Error("지원하지 않는 모델입니다. gemma4:e2b, gemma4:e4b, llama3.2-vision, qwen3.5:9b, olmocr2, glm-ocr 중 선택해주세요.")
         }
 
         // Tesseract 결과에 따라 프롬프트 구성
@@ -242,58 +246,88 @@ export async function extractTextFromPDF(
         console.log(`[PDF] OCR 프롬프트 타입: ${tesseractDraft.length > 50 ? "교정 모드" : "직접 읽기 모드"}`)
         console.log(`[PDF] Tesseract 초안 길이: ${tesseractDraft.length}자`)
 
-        const timeout = MODEL_TIMEOUTS[selectedModel] || 300000
+        // Vision LLM 호출 함수 (재사용 가능)
+        const callVisionModel = async (modelName: string): Promise<{ text: string | null; isTimeout: boolean }> => {
+          const timeout = MODEL_TIMEOUTS[modelName] || 300000
 
-        try {
-          console.log(`[PDF] ${selectedModel}으로 OCR 실행... (타임아웃: ${timeout / 1000}초)`)
-          const res = await fetch("http://localhost:11434/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: selectedModel,
-              messages: [{
-                role: "user",
-                content: OCR_PROMPT,
-                images: [finalBase64Image]
-              }],
-              stream: false
-            }),
-            signal: AbortSignal.timeout(timeout)
-          })
+          try {
+            console.log(`[PDF] ${modelName}으로 OCR 실행... (타임아웃: ${timeout / 1000}초)`)
+            const res = await fetch("http://localhost:11434/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: modelName,
+                messages: [{
+                  role: "user",
+                  content: OCR_PROMPT,
+                  images: [finalBase64Image]
+                }],
+                stream: false
+              }),
+              signal: AbortSignal.timeout(timeout)
+            })
 
-          if (!res.ok) {
-            const errText = await res.text()
-            console.error(`[PDF] ${selectedModel} HTTP 오류:`, res.status, errText)
-            throw new Error(`HTTP ${res.status}`)
-          }
-
-          const data = await res.json()
-          console.log(`[PDF] ${selectedModel} 응답 구조:`, JSON.stringify(data, null, 2))
-
-          const text = data.message?.content?.trim()
-
-          if (text && text.length > 5) {
-            console.log(`[PDF] ${selectedModel} OCR 성공, 텍스트 길이: ${text.length}자`)
-            return `파일명: ${name}\n\n${prefix}${text}`
-          } else {
-            console.log(`[PDF] ${selectedModel} 텍스트 추출 실패`)
-            console.log(`  - data.message 존재:`, !!data.message)
-            console.log(`  - content 값:`, data.message?.content)
-            console.log(`  - content 타입:`, typeof data.message?.content)
-            console.log(`  - content 길이:`, data.message?.content?.length)
-
-            // Tesseract 결과라도 반환 (폴백)
-            if (tesseractDraft && tesseractDraft.length > 50) {
-              console.log(`[PDF] Vision 실패, Tesseract 결과 반환 (${tesseractDraft.length}자)`)
-              return `파일명: ${name}\n\n${prefix}[Tesseract 초안]\n${tesseractDraft}`
+            if (!res.ok) {
+              const errText = await res.text()
+              console.error(`[PDF] ${modelName} HTTP 오류:`, res.status, errText)
+              return { text: null, isTimeout: false }
             }
 
-            return "문서를 읽을 수 없어요. 다른 모델을 선택해 주세요."
+            const data = await res.json()
+            console.log(`[PDF] ${modelName} 응답 데이터:`, JSON.stringify(data).substring(0, 200))
+
+            const text = data.message?.content?.trim()
+
+            if (text && text.length > 5) {
+              console.log(`[PDF] ${modelName} OCR 성공, 텍스트 길이: ${text.length}자`)
+              return { text, isTimeout: false }
+            } else {
+              console.log(`[PDF] ${modelName} 빈 응답 감지`)
+              console.log(`  - data 전체:`, JSON.stringify(data))
+              console.log(`  - message 존재:`, !!data.message)
+              console.log(`  - content 값:`, data.message?.content)
+              console.log(`  - content 타입:`, typeof data.message?.content)
+              console.log(`  - content 길이:`, data.message?.content?.length)
+              return { text: null, isTimeout: false }
+            }
+          } catch (e: unknown) {
+            const msg = e instanceof Error ? e.message : String(e)
+            const isTimeout = msg.toLowerCase().includes("timeout")
+            console.error(`[PDF] ${modelName} OCR 실패:`, msg, `(타임아웃: ${isTimeout})`)
+            return { text: null, isTimeout }
           }
-        } catch (e: unknown) {
-          const msg = e instanceof Error ? e.message : String(e)
-          console.error(`[PDF] ${selectedModel} OCR 실패:`, msg)
-          throw new Error(`${selectedModel} 분석 실패: ${msg}`)
+        }
+
+        // 사용자 선택 모델로만 시도 (fallback 없음)
+        // 단, gemma4:e2b 타임아웃 시에만 gemma4:e4b로 자동 전환
+        let finalText: string | null = null
+
+        try {
+          console.log(`[PDF] 사용자 선택 모델: ${selectedModel}`)
+          const result = await callVisionModel(selectedModel)
+
+          if (result.text) {
+            console.log(`[PDF] ${selectedModel} 성공!`)
+            return `파일명: ${name}\n\n${prefix}${result.text}`
+          }
+
+          // gemma4:e2b 타임아웃 시 gemma4:e4b로 자동 전환
+          if (selectedModel === "gemma4:e2b" && result.isTimeout) {
+            console.log(`[PDF] gemma4:e2b 타임아웃 → gemma4:e4b로 자동 전환`)
+            const fallbackResult = await callVisionModel("gemma4:e4b")
+            if (fallbackResult.text) {
+              console.log(`[PDF] gemma4:e4b 성공!`)
+              return `파일명: ${name}\n\n${prefix}${fallbackResult.text}`
+            }
+          }
+
+          // 모델 실패 → Tesseract 결과라도 반환
+          if (tesseractDraft && tesseractDraft.length > 50) {
+            console.log(`[PDF] ${selectedModel} 실패, Tesseract 결과 반환 (${tesseractDraft.length}자)`)
+            return `파일명: ${name}\n\n${prefix}[Tesseract 초안]\n${tesseractDraft}`
+          }
+
+          return `${selectedModel} 모델이 문서를 읽지 못했어요. 다른 모델을 선택해 주세요.`
         } finally {
           // 임시 파일 정리
           setTimeout(() => {
