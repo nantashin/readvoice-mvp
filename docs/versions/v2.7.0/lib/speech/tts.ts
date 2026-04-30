@@ -334,7 +334,7 @@ function speakWithPauses(
     const utt = new SpeechSynthesisUtterance(segment)
     utt.lang = 'ko-KR'
     utt.rate = rate
-    utt.pitch = 1.8  // 부드럽고 친절한 홈쇼핑 안내원 톤 (밝고 따뜻한 음색)
+    utt.pitch = 1.7  // 20대 초반 여성의 밝고 경쾌한 음성 (솔 음계)
     if (voiceRef) utt.voice = voiceRef
 
     // 첫 문장 시작 시 콜백 호출 및 BGM 덕킹
@@ -410,14 +410,14 @@ export function useSpeechSynthesis() {
       voiceRef.current = youngFemale || koreanFemale || koreanAny || voices[0] || null
 
       if (voiceRef.current) {
-        console.log("[TTS] 선택된 음성:", voiceRef.current.name, "| pitch: 1.8 (밝고 친절), rate: 1.0 (또박또박)")
+        console.log("[TTS] 선택된 음성:", voiceRef.current.name, "| pitch: 1.7 (솔 음계), rate: 1.15 (경쾌)")
       }
     }
     loadVoice()
     window.speechSynthesis.onvoiceschanged = loadVoice
   }, [])
 
-  const speak = useCallback((text: string, rate: number = 1.0, onEnd?: () => void) => {
+  const speak = useCallback((text: string, rate: number = 1.15, onEnd?: () => void) => {
     if (!text || typeof window === "undefined") return
 
     speakWithPauses(

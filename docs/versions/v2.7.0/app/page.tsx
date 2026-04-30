@@ -97,8 +97,8 @@ export default function Home() {
       window.speechSynthesis.cancel()
       const utt = new SpeechSynthesisUtterance(INTRO_TTS)
       utt.lang = "ko-KR"
-      utt.rate = 1.0  // 또박또박 친절하게
-      utt.pitch = 1.8  // 밝고 따뜻한 홈쇼핑 안내원 톤
+      utt.rate = 1.15
+      utt.pitch = 1.7  // 솔 높이 (밝고 경쾌한 음성)
       window.speechSynthesis.speak(utt)
     }, 1000)
 
