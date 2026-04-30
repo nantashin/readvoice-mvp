@@ -101,37 +101,57 @@ const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로�
 혼합 (문서인데 그림도 있음)`
 
 // llama3.2-vision 전용 프롬프트 (항목별 분석 → 번역)
-const LLAMA_PROMPT = `Analyze this image in the following order:
+const LLAMA_PROMPT = `Analyze this image carefully and describe in the following order:
 
-0. Start with the largest elements:
-   - Describe the largest image/character/figure first if present
-   - Read the largest text/title first (mention size and position: "center-top in large font...")
+0. Start with the largest elements first:
+   - If there is a largest image/character/figure, describe it first in detail
+   - If there is largest text/title, read it first and mention its size and exact position (e.g., "center-top in very large font...")
 
-1. All text in image (largest→smallest):
-   - Center-top title first if present
-   - Then left→right, top→bottom order
-   - Ignore symbols <>, <<>>, [], {} and read only the text inside (likely titles/subtitles)
-   - If arrows (→, ⇒) or connection lines exist, read connected items together as they are related
-   - If image and text are vertically adjacent, describe together (e.g., "dog photo with text 'cute' below")
+1. All text in image (READ CAREFULLY - largest text→smallest text):
+   IMPORTANT: Read ALL visible text, letters, numbers, and symbols accurately.
 
-2. Main character: Clothing, posture, expression, what both hands are holding
-   (SKIP this item if no character present)
+   Reading order:
+   - Start with the LARGEST text (title/heading) at center-top if present
+   - Mention exact position and size: "At [position] in [size] font: [exact text]"
+   - Then read left→right, top→bottom for remaining text
+   - Read EVERY word, number, and character you see
+   - Remove only decorative symbols: <>, <<>>, [], {} but READ the text inside them
+   - If arrows (→, ⇒) or connection lines exist, read connected text together (they are related)
+   - If text is vertically adjacent to an image, describe them together (e.g., "dog photo with caption 'cute' directly below")
+   - For small text or fine print, read it carefully and mention "in small font: [text]"
+   - If text overlaps images, read it and note the overlap
 
-3. Other characters or animals: Describe in detail if present
-   (SKIP this item if none)
+2. Main character (if present):
+   - Clothing details
+   - Body posture and position
+   - Facial expression
+   - What both hands are holding
+   (SKIP this entire item if no character is present)
 
-4. Background: Sky, buildings, nature, lighting, colors
+3. Other characters or animals (if present):
+   - Describe each in detail
+   (SKIP this entire item if none present)
 
-5. Overall colors and atmosphere
+4. Background elements:
+   - Sky, buildings, nature
+   - Lighting and time of day
+   - Background colors
 
-6. Image summary: Based on the large title and content above, summarize what this image is about in one sentence
+5. Overall colors and atmosphere:
+   - Dominant colors throughout the image
+   - Overall mood and feeling
 
-Important rules:
-- Connection lines (→, ⇒, arrows, lines) indicate relationships - read connected items together
-- SKIP items where you would answer "none" - don't mention them at all
-- Describe ONLY what is ACTUALLY VISIBLE
-- Never guess or interpret
-- Be extremely specific and detailed`
+6. Image summary:
+   - Based on the large title/heading and all content above
+   - Summarize what this image is about in one clear sentence
+
+CRITICAL RULES:
+- TEXT READING IS PRIORITY: Read ALL visible text accurately, don't skip any words
+- Connection lines (→, ⇒, arrows, lines) = related content, read together
+- SKIP items where you would say "none" - omit that section entirely
+- Describe ONLY what is ACTUALLY VISIBLE, never guess or interpret
+- Be extremely specific and detailed, especially for text
+- For text, always mention position and relative size`
 
 function removeEnglishWords(text: string): string {
   return text
