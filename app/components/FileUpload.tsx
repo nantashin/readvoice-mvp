@@ -210,29 +210,31 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         console.log("[자동 분류] 결과:", classification)
         bgmManager.stop()
 
-        // 분류 결과에 따라 자동으로 가장 빠른 모델 선택 후 즉시 실행
-        let autoModel = ""
+        // 분류 결과만 알려주고, 모델 선택은 사용자가 하도록 변경
         let message = ""
+        let suggestedCategory = ""
 
         if (classification === "document") {
-          autoModel = "qwen3.5:9b" // 문서는 큐쓰리로 자동 시작 (문서 OCR 모델)
-          message = "문서 이미지로 판단했어요. 큐쓰리 모델로 읽어드릴게요."
+          suggestedCategory = "document"
+          message = "문서 이미지로 판단했어요. 어떤 모델로 읽어드릴까요? 스페이스바를 누르고 말씀해 주세요."
         } else if (classification === "photo") {
-          autoModel = "gemma4:e2b" // 사진은 구글 이기가로 자동 시작 (이미지 모델)
-          message = "이미지로 판단했어요. 구글 이기가 모델로 설명해 드릴게요."
+          suggestedCategory = "photo"
+          message = "이미지로 판단했어요. 어떤 모델로 설명해 드릴까요? 스페이스바를 누르고 말씀해 주세요."
         } else {
-          // mixed - 기본은 문서로 처리 (문서 OCR 모델)
-          autoModel = "qwen3.5:9b"
-          message = "그림과 글자가 함께 있어요. 글자를 먼저 읽어드릴게요."
+          // mixed
+          suggestedCategory = "mixed"
+          message = "그림과 글자가 함께 있어요. 어떤 모델로 분석해 드릴까요? 스페이스바를 누르고 말씀해 주세요."
         }
 
         onStatusChange("speaking")
         tts.speak(message)
 
-        // TTS 끝난 후 자동 분석 시작
+        // 분류 완료 이벤트 발송 (모델 선택 대기)
         setTimeout(() => {
-          onStatusChange("processing")
-          processFile(file, autoModel)
+          onStatusChange("idle")
+          window.dispatchEvent(new CustomEvent("imageClassified", {
+            detail: { file, classification: suggestedCategory }
+          }))
         }, (message.length / 10) * 1000 + 500)
       } catch (e) {
         console.error("[자동 분류] 실패:", e)

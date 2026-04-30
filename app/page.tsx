@@ -217,6 +217,31 @@ export default function Home() {
     return () => window.removeEventListener("classifyFailed", handleClassifyFailed as EventListener)
   }, [startListening])
 
+  // imageClassified 이벤트 수신 (자동 분류 완료)
+  useEffect(() => {
+    const handleImageClassified = (event: CustomEvent<{ file: File; classification: string }>) => {
+      const { file, classification } = event.detail
+      setPendingFile(file)
+
+      // classification에 따라 fileType 설정
+      if (classification === "document") {
+        setFileType("document")
+      } else {
+        setFileType("image")
+      }
+
+      // 모델 선택 메뉴로 전환 (사용자가 모델 선택 가능하도록)
+      setMenuState("model_select")
+      setMicState("off")
+
+      // 마이크 대기
+      setTimeout(() => startListening(), 500)
+    }
+
+    window.addEventListener("imageClassified", handleImageClassified as EventListener)
+    return () => window.removeEventListener("imageClassified", handleImageClassified as EventListener)
+  }, [startListening])
+
   // pdfScannedSelected 이벤트 수신
   useEffect(() => {
     const handlePdfScannedSelected = (event: CustomEvent<{ file: File }>) => {

@@ -139,120 +139,95 @@ const CLASSIFY_PROMPT = `이 이미지가 다음 중 무엇인지 한 단어로�
 사진 (인물사진, 풍경, 일러스트, 그림, 카드),
 혼합 (문서인데 그림도 있음)`
 
-// llama3.2-vision 전용 프롬프트 (Q3 + 라마비전 세번째 스타일 - 구체적 나열)
-const LLAMA_PROMPT = `Analyze this image in detail. Read ALL text exactly as written.
+// llama3.2-vision 전용 프롬프트 (극단적 단순화 - 명령 우선)
+const LLAMA_PROMPT = `YOU MUST READ ALL TEXT EXACTLY. NO SUMMARIES.
 
-GOAL: A blind person should be able to mentally reconstruct this entire image from your description.
+FORBIDDEN WORDS - NEVER USE THESE:
+❌ "there are names" → ✅ WRITE THE ACTUAL NAMES
+❌ "relationships are shown" → ✅ WRITE THE ACTUAL RELATIONSHIPS
+❌ "characters' names and ages" → ✅ "장보고 30s", "서라 20s", "문씨부인"
+❌ "indicated by arrows" → ✅ "장율 ↔ 문씨부인: 부부"
+❌ "listed" / "나열되어" → ✅ WRITE WHAT IS LISTED
+❌ "small images" → ✅ DESCRIBE WHAT THE IMAGE SHOWS
 
-CRITICAL: READ EVERY TEXT EXACTLY. Do NOT summarize - list the actual text you see.
+RULE #1: READ EVERY TEXT WORD-BY-WORD
+Example CORRECT format:
+• 장보고 30s
+• (무)장군 청해진 대사
+• 문씨부인: 모
+• 서라 20s
 
-0. Largest elements first:
-   • Main title: Read the EXACT large text (usually center-top): "[exact text]"
-   • Main image/subject: Brief description if present
+Example WRONG format:
+❌ "Characters' names with ages are listed"
+❌ "There are names like 장보고"
 
-1. All text in image (READ EVERY WORD - list them concretely):
+RULE #2: COPY THE EXACT TEXT YOU SEE
+If you see "장율 50s 부/(무)十長", write EXACTLY that.
+If you see "사도진 ↔ 사소연: 父女", write EXACTLY that.
 
-   IMPORTANT RULES:
-   - Do NOT say "there are names and ages" - READ THE ACTUAL NAMES AND AGES
-   - Do NOT say "relationships are shown" - READ THE ACTUAL RELATIONSHIPS
-   - Write exact text in quotes: "장보고 30s", "문씨부인", etc.
+---
 
-   A. Top section / Legend (if present):
-   List the exact text:
-   • "[exact text]" - [what it explains]
-   • "[exact text]" - [what it explains]
+0. TITLE (largest text):
+   "[copy the exact title text here]"
+
+1. LEGEND / EXPLANATIONS (top section):
+   • "[exact text]"
+   • "[exact text]"
 
    Example:
-   • "남자 캐릭터" - category label
-   • "(무) 무령군 직위" - symbol explanation
-   • "(해) 해적 직위" - symbol explanation
+   • "남자 캐릭터"
+   • "(무) 무령군 직위"
+   • "(해) 해적 직위"
 
-   B. Main content (organize by position):
+2. ALL CHARACTERS / ELEMENTS (position by position):
 
-   Upper left section:
-   • [Character/element name]: "[exact text]"
-   • Additional info: "[exact text]"
-
-   Example:
+   Upper left:
    • 장율 50s: 부/(무)十長 (해)공수장
    • 문씨부인: 모
+   [WRITE ALL - use this exact format]
 
-   Center section:
-   • [Character/element name]: "[exact text]"
-   • Additional info: "[exact text]"
-
-   Example:
+   Center:
    • 장보고 30s: 주인공 (무)장군 청해진 대사
-   • 서라 20s: (next to 장보고)
+   • 서라 20s
+   [WRITE ALL - use this exact format]
 
    Lower section:
-   • [Character/element name]: "[exact text]"
+   • [name] [age]: [role/title]
+   [WRITE ALL]
 
-   List ALL major elements. Do NOT skip.
-
-   C. Relationships / Connections:
-   List every connection you see:
-   • [Name A] ↔ [Name B]: [relationship]
-   • [Name A] → [Name B]: [relationship]
-
-   Keep Korean/Chinese characters: 父女, 兄妹, 君臣, etc.
-
-   Example:
+3. RELATIONSHIPS (every connection):
    • 장율 ↔ 문씨부인: 부부
    • 사도진 ↔ 사소연: 父女
    • 홍덕왕 → 문경세: 君臣
+   [WRITE ALL - use exact symbols: ↔ → 父女 兄妹 君臣]
 
-   List ALL connections.
-
-   D. Small text / Copyright:
-   • "[exact text at corners or bottom]"
-
-2. Images / Photos (describe each):
-
-   For EACH major photo/image:
-   • Position: [location]
-   • Shows: [person/object - describe appearance]
-   • Clothing: [details]
-   • Posture/Expression: [details]
-   • Text labeling it: "[exact text]"
-   • Background box color: [if applicable]
-
-   Example:
-   • Center: Man in black armor
-     - Serious expression, holding sword
-     - Text below: "장보고 30s"
+4. PHOTOS / IMAGES (describe each):
+   • Center: Photo of [describe person/object]
+     - Clothing: [describe]
+     - Expression: [describe]
+     - Text below photo: "장보고 30s"
      - Text below that: "(무)장군 청해진 대사"
-     - Background: dark tones
 
-3. Layout and color coding:
+   • Upper right: Photo of [describe]
+     - Text: "[exact text]"
 
-   • Background color: [overall]
-   • Color coding system: [e.g., "blue box = male, pink = female, gold = royalty"]
-   • Layout: [grid / flowchart / hierarchy / scattered]
-   • Lines/arrows connecting elements: [yes/no, what type]
+   [Describe ALL photos this way]
 
-4. Overall colors and atmosphere:
+5. SMALL TEXT:
+   • "[exact copyright or small text]"
 
-   • Dominant colors: [list main colors]
-   • Style: [formal diagram / artistic poster / photo collage / illustration]
-   • Mood: [serious / dramatic / educational / etc.]
+6. IMAGE SUMMARY:
+   This is a [type] for "[exact title]" showing [brief description].
 
-5. Image summary:
+---
 
-   Based on the title "[exact title text]" and all content above:
-   This image is [type of image] showing [main subject]. [One sentence explaining overall purpose].
+FINAL CHECK - DID YOU:
+✓ Write actual names like "장보고 30s" instead of saying "names are listed"?
+✓ Write actual relationships like "A ↔ B: 父女" instead of "relationships are shown"?
+✓ Copy every text exactly as you see it?
+✓ Describe every photo individually?
 
-   Example:
-   This image is a character relationship chart for the drama "AI 장보고" showing all main characters, their ages, roles, and family/hierarchical relationships through a structured diagram.
-
-CRITICAL RULES:
-- READ EXACT TEXT: Write "장보고 30s", NOT "main character's name and age"
-- LIST EVERYTHING: Do NOT say "there are many characters" - LIST THEIR NAMES
-- CONCRETE RELATIONSHIPS: Write "A ↔ B: 父女", NOT "relationships are indicated"
-- NO ABSTRACTION: Avoid "주요 캐릭터들의 이름" - write the actual names
-- COMPLETE: Read ALL visible text, including small text
-- KEEP SYMBOLS: 父女, 兄妹, 君臣, ↔, → as-is
-- ORGANIZE: Group by position (upper/center/lower) for clarity`
+IF YOU USED ANY FORBIDDEN WORDS, START OVER.`
 
 function removeEnglishWords(text: string): string {
   return text
