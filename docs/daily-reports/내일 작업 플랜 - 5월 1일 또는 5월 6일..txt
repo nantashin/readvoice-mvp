@@ -1,0 +1,224 @@
+  📅 내일 작업 플랜 - 5월 1일 또는 5월 6일.
+
+  🔍 Phase 1: 버전 비교 테스트 (오전, 1시간)
+
+  목표
+
+  라마비전 프롬프트 4개 버전 중 최적 버전 찾기
+
+  작업 순서
+
+  # 1. v2.7.0 테스트
+  git log --oneline --all | grep "v2.7.0"
+  git checkout [v2.7.0 커밋해시]
+  npm run dev
+  # → 인물관계도.png 테스트 → 결과 기록
+
+  # 2. v2.7.1 테스트
+  git checkout [v2.7.1 커밋해시]
+  npm run dev
+  # → 동일 테스트 → 결과 기록
+
+  # 3. v2.7.2 테스트
+  git checkout [v2.7.2 커밋해시]
+  npm run dev
+  # → 동일 테스트 → 결과 기록
+
+  # 4. latest (오늘 수정본) 테스트
+  git checkout master
+  npm run dev
+  # → 동일 테스트 → 결과 기록
+
+  # 5. 최적 버전 선택 및 태그
+  git tag v2.7.X-stable [선택한_커밋]
+  git push origin v2.7.X-stable
+
+  결과물
+
+  - 4개 버전 비교표 (docs/comparison-report.md)
+  - 안정 버전 태그
+
+  ---
+  🔧 Phase 2: 코드 품질 개선 (오후, 30분)
+
+  최적 버전으로 체크아웃 후 시작
+
+  작업 1: 접근성 원칙 위반 수정 (10분)
+
+  파일 1: app/api/chat/route.ts:5
+  // 수정 전
+  const systemPrompt = `당신은 시각장애인과 거동불편인을 위한 AI 음성 도우미입니다.`
+
+  // 수정 후
+  const systemPrompt = `당신은 모든 사용자를 위한 AI 음성 도우미입니다.`
+
+  파일 2: app/page.tsx:962
+  // 수정 전
+  <h1 className="...">시각장애인을 위한 AI 음성 도우미</h1>
+
+  // 수정 후
+  <h1 className="...">AI 음성 도우미</h1>
+
+  작업 2: Ollama URL 환경변수화 (10분)
+
+  파일 3: modules/ocr/gemini.ts
+  // 파일 상단에 추가
+  const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+
+  // fetch 부분 수정
+  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+
+  파일 4: modules/ocr/pdf.ts
+  // 동일하게 OLLAMA_URL 적용
+
+  작업 3: 테스트 & 커밋 (10분)
+
+  # 테스트
+  npm run dev
+  # → 음성 대화, 이미지 분석, PDF 처리 각 1회씩
+
+  # Git 커밋
+  git add app/api/chat/route.ts app/page.tsx modules/ocr/gemini.ts modules/ocr/pdf.ts
+
+  git commit -m "fix: 접근성 원칙 준수 및 환경변수 개선
+
+  - 장애 언급 텍스트 제거 (CLAUDE.md 규칙 준수)
+    - app/api/chat/route.ts: 시스템 프롬프트 수정
+    - app/page.tsx: UI 텍스트 수정
+  - Ollama URL 하드코딩 제거
+    - modules/ocr/gemini.ts: OLLAMA_BASE_URL 환경변수 사용
+    - modules/ocr/pdf.ts: OLLAMA_BASE_URL 환경변수 사용
+
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+
+  # 버전 저장
+  .\scripts\version-save.ps1 -Version "v2.7.3" -Message "접근성 원칙 준수 및 환경변수 개선"
+
+  # Push
+  git push origin master
+  git push origin v2.7.3
+
+  ---
+  📝 커밋 메시지 미리보기
+
+  Phase 1 (버전 선택 후)
+
+  chore: v2.7.X를 안정 버전으로 선택
+
+  - v2.7.0~2 및 latest 버전 비교 테스트 완료
+  - 라마비전 프롬프트 성능 평가 결과:
+    [선택 이유 기술]
+  - v2.7.X-stable 태그 생성
+
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+  Phase 2 (코드 수정)
+
+  fix: 접근성 원칙 준수 및 환경변수 개선
+
+  - 장애 언급 텍스트 제거 (CLAUDE.md 규칙 준수)
+    - app/api/chat/route.ts: 시스템 프롬프트 수정
+    - app/page.tsx: UI 텍스트 수정
+  - Ollama URL 하드코딩 제거
+    - modules/ocr/gemini.ts: OLLAMA_BASE_URL 환경변수 사용
+    - modules/ocr/pdf.ts: OLLAMA_BASE_URL 환경변수 사용
+
+  Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+  ---
+  🎯 내일 시작 체크리스트
+
+  # 1. 서버 실행
+  ollama serve  # 터미널 1
+  npm run dev   # 터미널 2
+
+  # 2. 오늘 작업 확인
+  cat docs/daily-reports/2026-05-01-action-plan.md
+
+  # 3. Phase 1 시작
+  git log --oneline --all | grep "v2.7"
+
+  ---
+  ✅ 오늘 완료된 작업
+
+  - Opus 4.6으로 전체 체크
+  - Sonnet 4.6 가격 비교 (동일 비용 확인)
+  - Sonnet 4.6으로 모델 전환
+  - 내일 작업 계획 문서 작성
+  - Git 커밋 2개 완료
+  - Git Push 완료
+
+  다음 커밋 예정: v2.7.3 또는 v2.8.0 (내일 Phase 2 완료 시)
+
+  내일 이 순서대로 진행하시면 됩니다! 🚀
+
+-===
+
+●C✅ 완료되었습니다!                                                                              ─      ─        ─    ─       ─        ─        ─      ─    ─      ─    ─  ─      ─        ─    ─  ─  ─        ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ---
+  📊 작업 완료 내역                                                                                                                                                                                                                                                                                                          
+  1. 일일보고서 한글 인코딩 수정                                                                                                                                                                                                                                                                                             
+  - 파일: docs/daily-reports/2026-04-30.md
+  - 수정 내용:
+    - ???쇱씪 → 일일
+    - 而ㅻ컠 → 커밋
+    - 湲곕뒫 → 기능
+    - 등 모든 깨진 한글 섹션 정상화
+
+  2. 업무보고 요약본 생성 ⭐
+
+  - 파일: docs/daily-reports/2026-04-30_업무보고_요약.txt
+  - 내용:
+    - ✅ 주요 완료 사항 5건
+    - 🔧 기술적 변경사항 (6개 버그 수정)
+    - ⚠️현재 이슈 (라마비전 프롬프트 미검증)
+    - 📅 내일 작업 계획 (3단계)
+    - 📈 작동 상태 (6개 기능 정상)
+    - 📦 설치된 모델 (7개)
+
+  3. Git 커밋 & Push 완료
+
+  bd5681f - docs: 2026-04-30 일일보고서 한글 인코딩 수정 및 업무보고 요약본 생성
+
+  ---
+  📋 업무보고 요약 (핵심만)
+
+  오늘 작업 (4월 30일)
+
+  - 총 커밋: 21개
+  - 주요 작업: 라마비전 프롬프트 3회 개선, UX 개선 (자동분석 제거), 접근성 원칙 확립
+  - 버그 수정: 6건 (자동분석, UI 번호, 접근성 위반 등)
+  - 현재 진행률: Phase 2 (이미지/PDF) 65% 완료
+
+  현재 이슈
+
+  🔴 CRITICAL: 라마비전 프롬프트 효과 미검증
+  - 3번 수정했으나 실제 테스트 안 함
+  - 내일 v2.7.0 ~ latest 4개 버전 비교 필수
+
+  내일 작업 (5월 1일)
+
+  1. 버전 비교 테스트 (1시간) - v2.7.0, v2.7.1, v2.7.2, latest
+  2. 최적 버전 선택 (30분) - 비교표 작성 후 v2.7.X-stable 태그
+  3. 방향 결정 - 안정화 vs 템플릿 시스템
+
+  작동 상태
+
+  ✅ 음성 대화, 이미지 분석, PDF OCR, BGM, TTS, STT 모두 정상
+
+  ---
+  🎯 오늘 밤 준비 완료
+
+  - 일일보고서 한글 정상화
+  - 업무보고 요약본 생성
+  - Git 커밋 & Push
+  - 내일 작업 계획 (docs/TODO_2026-05-01.md)
+  - Sonnet 4.6 전환
+
+  내일 아침 시작 파일:
+  1. docs/TODO_2026-05-01.md - 전체 작업 계획
+  2. docs/daily-reports/2026-04-30_업무보고_요약.txt - 오늘 요약
+  3. docs/daily-reports/2026-05-01-action-plan.md - 상세 행동 계획
+
+  좋은 밤 되세요! 🌙

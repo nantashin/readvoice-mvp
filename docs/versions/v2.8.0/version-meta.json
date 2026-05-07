@@ -1,0 +1,7 @@
+{
+  "version": "v2.8.0",
+  "date": "2026-05-07",
+  "phase": "Phase 2",
+  "message": "TTS 2배속 기본, 마이크 효과음, BGM 연속재생 적용",
+  "gitTag": "v2.8.0"
+}

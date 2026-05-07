@@ -40,7 +40,15 @@
       "Bash(python -c \"from docx import Document; doc = Document\\('모델별 이미지 텍스트 시험 결과.docx'\\); print\\('\\\\n'.join\\([p.text for p in doc.paragraphs]\\)\\)\")",
       "Bash(python -c \"import sys; sys.stdout.reconfigure\\(encoding='utf-8'\\); from docx import Document; import glob; files = glob.glob\\('모델*.docx'\\); doc = Document\\(files[0]\\); [print\\(p.text\\) for p in doc.paragraphs]\")",
       "WebSearch",
-      "Read(//c/Users/tara0/.claude/**)"
+      "Read(//c/Users/tara0/.claude/**)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(curl -s http://localhost:3000 -I)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(cp app/page.tsx docs/versions/v2.8.0/app_page.tsx)",
+      "Bash(cp app/components/FileUpload.tsx docs/versions/v2.8.0/app_components_FileUpload.tsx)",
+      "Bash(cp app/components/MicButton.tsx docs/versions/v2.8.0/app_components_MicButton.tsx)",
+      "Bash(cp app/api/ocr/route.ts docs/versions/v2.8.0/app_api_ocr_route.ts)",
+      "Bash(cp modules/ocr/gemini.ts docs/versions/v2.8.0/modules_ocr_gemini.ts)"
     ]
   }
 }

@@ -44,8 +44,10 @@ export function loadSpeechRate(): number {
   if (typeof window !== "undefined") {
     const saved = localStorage.getItem("speechRate")
     if (saved) {
-      return parseFloat(saved)
+      const rate = parseFloat(saved)
+      // 속도 범위: 0.5 ~ 10.0
+      return Math.max(0.5, Math.min(10.0, rate))
     }
   }
-  return 1.5
+  return 2.0  // 기본 속도 2.0배
 }

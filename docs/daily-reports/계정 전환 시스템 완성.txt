@@ -1,0 +1,159 @@
+●W✅ 계정 전환 시스템 완성!        )                종료할 건데, 종료할 때 그냥 파워셀 창 끄면 돼? 클로드 로그아웃하고 꺼? 저장할 것 아무것도 없어? 명령어 실행할 것도 없어?
+    ──────
+  ---
+  🎉 생성된 파일들                                                                                                                                                                                                                                                                                                           
+  📘 1. 완전한 가이드 (상세)                                                                                                                                                                                                                                                                                                 
+  docs/ACCOUNT_SWITCHING_GUIDE.md
+  - ✅ 3단계 전환 프로토콜 (전환 전/전환/전환 후)
+  - ✅ Git + Handoff 문서 활용 방법
+  - ✅ 실전 예시 (shinnanta88 → arsenwatson)
+  - ✅ ChatGPT Plus/Pro 활용 방안
+  - ✅ GitHub Copilot(Codex) 연계 전략
+  - ✅ 문제 해결 가이드
+
+  📋 2. 빠른 참조 (간단)
+
+  docs/계정전환_빠른가이드.txt
+  - ⚡ 3단계 절차 (복사용 명령어 포함)
+  - ⚡ 첫 메시지 템플릿
+  - ⚡ 핵심 원칙 (✅ 할 것 / ❌ 하지 말 것)
+
+  🤖 3. 자동화 스크립트
+
+  scripts/switch-account-prepare.ps1
+  - 🔄 Git 자동 커밋 & Push
+  - 📝 Handoff 문서 자동 업데이트
+  - 📋 전환 절차 자동 안내
+  - 💬 첫 메시지 템플릿 출력
+
+  📄 4. Handoff 문서 (업데이트)
+
+  docs/handoff/save-state.md
+  - 계정 정보 추가 (제1/제2)
+  - 계정 전환용 첫 메시지 템플릿
+  - 최신 상태 반영
+
+  ---
+  🚀 계정 전환 방법 (초간단)
+
+  방법 1: 자동화 스크립트 (권장)
+
+  # 현재 계정에서
+  .\scripts\switch-account-prepare.ps1
+
+  # 안내에 따라 진행
+  claude logout
+  claude login  # → arsenwatson@gmail.com
+
+  # 새 계정에서
+  cd C:\Users\tara0\readvoice-mvp
+  git pull origin master
+  claude chat
+  # → 출력된 메시지 복사해서 보내기
+
+  방법 2: 수동
+
+  # 현재 계정에서
+  git add . && git commit -m "계정 전환 전" && git push
+  claude logout
+
+  # 새 계정에서
+  claude login  # → arsenwatson@gmail.com
+  cd C:\Users\tara0\readvoice-mvp
+  git pull origin master
+  claude chat
+
+  첫 메시지:
+  제1계정에서 작업하던 READ VOICE Pro MVP 프로젝트를 이어받았어.
+
+  다음 파일들을 확인하고 상황을 파악해줘:
+  1. docs/handoff/save-state.md (현재 상태)
+  2. docs/TODO_2026-05-01.md (내일 작업 목록)
+
+  상황 파악되면 바로 작업 시작하자.
+
+  ---
+  💡 왜 계속 빼먹는 것처럼 보였나?
+
+  문제 원인
+
+  1. 대화 히스토리 분리 - 각 계정은 독립적인 히스토리를 가짐
+  2. 컨텍스트 미전달 - "이어서 해줘"만 말하면 Claude는 이전 상황을 모름
+  3. Git 미동기화 - 코드 변경사항이 push되지 않으면 새 계정에서 못 봄
+
+  해결 방법
+
+  1. Git으로 코드 동기화 ← 이제 자동화됨
+  2. Handoff 문서로 상황 전달 ← save-state.md
+  3. 명시적 첫 메시지 ← 템플릿 제공
+
+  ---
+  🤖 ChatGPT & Codex 활용법
+
+  ChatGPT Plus/Pro 활용
+
+  Claude Code (주력)
+      ↓
+  막히거나 추가 의견 필요
+      ↓
+  ChatGPT Plus/Pro (보조)
+      - 코드 리뷰
+      - 대안 접근법
+      - 문서 작성
+
+  ⚠️주의: ChatGPT Plus/Pro는 웹 UI 전용
+  API 활용은 별도 API 키 필요 (Plus/Pro ≠ API 크레딧)
+
+  GitHub Copilot 연계
+
+  1. Claude Code: 아키텍처 설계
+  2. Copilot: 세부 코드 자동완성
+  3. Claude Code: 최종 검토 & 리팩토링
+
+  ---
+  📊 작업 흐름 (이제부터)
+
+  [제1계정 작업]
+      ↓
+  [.\scripts\switch-account-prepare.ps1] ← 자동화!
+      ↓
+  [claude logout → login]
+      ↓
+  [git pull]
+      ↓
+  [템플릿 메시지 전송] ← 자동 출력됨
+      ↓
+  [제2계정 작업 계속]
+
+  ---
+  🎯 지금 바로 테스트해볼까요?
+
+  계정 전환을 실제로 테스트하려면:
+
+  # 1. 자동화 스크립트 실행
+  .\scripts\switch-account-prepare.ps1
+
+  # 2. 안내에 따라 진행
+  # (Git 저장 → 전환 안내 → 첫 메시지 템플릿 출력)
+
+  # 3. 실제로 계정 전환
+  claude logout
+  claude login  # arsenwatson@gmail.com
+
+  # 4. 프로젝트 동기화 후 재개
+  cd C:\Users\tara0\readvoice-mvp
+  git pull
+  claude chat
+  # → 출력된 메시지 복사 & 전송
+
+  ---
+  ✨ 완벽합니다!
+
+  이제 어느 계정에서든 작업을 끊김 없이 이어갈 수 있습니다!
+
+  - ✅ Git으로 코드 동기화
+  - ✅ Handoff 문서로 상황 전달
+  - ✅ 자동화 스크립트로 실수 방지
+  - ✅ ChatGPT/Copilot과 병행 가능
+
+  지금 끄셔도 됩니다! 내일 다른 계정으로 완벽하게 이어서 할 수 있습니다.

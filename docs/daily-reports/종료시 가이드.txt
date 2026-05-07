@@ -1,0 +1,112 @@
+●B✅ 완벽하게 준비되었습니다!        )                                                           ────────────────────────
+
+  ---
+  🎉 생성된 파일들                                                                                                                                                                                                                                                                                                           
+  1. 매일 사용 가이드                                                                                                                                                                                                                                                                                                        
+  📘 docs/DAILY_WORKFLOW.md - 영구 보관용
+  - 매일 종료 시 절차
+  - 매일 시작 시 절차 (5단계)
+  - 자주 사용하는 명령어
+  - 문제 해결 가이드
+
+  2. 오늘 종료 체크리스트
+
+  📋 docs/daily-checklist/2026-04-30_종료.txt
+  - 현재 상태 확인 (모두 ✓)
+  - 오늘 완료 작업 요약
+  - 내일 시작 절차
+  - 내일 주요 작업
+
+  3. 내일 시작 체크리스트
+
+  📋 docs/daily-checklist/2026-05-01_시작.txt
+  - 7단계 시작 절차 (체크박스 포함)
+  - STEP 1~3 상세 작업 (체크박스 포함)
+  - 테스트 결과 기록란
+
+  4. 재사용 템플릿
+
+  📄 docs/daily-checklist/TEMPLATE_시작.txt
+  - 매일 복사해서 날짜만 바꿔 사용
+
+  ---
+  🌙 지금 바로 종료하기
+
+  1. 서버 종료 (2개 터미널)
+
+  # 터미널 1, 2에서 각각
+  Ctrl + C
+
+  2. 파워셸 창 모두 닫기
+
+  3. 노트북 종료
+
+  ---
+  ☀️내일 아침 (2026-05-01) 시작 절차
+
+  파일 열기
+
+  C:\Users\tara0\readvoice-mvp\docs\daily-checklist\2026-05-01_시작.txt
+
+  명령어 순서대로 실행
+
+  1단계:
+  cd C:\Users\tara0\readvoice-mvp
+
+  2단계:
+  git status
+  git log --oneline -5
+  git pull origin master
+
+  3단계: 터미널 1 (Ollama)
+  ollama serve
+
+  4단계: 터미널 2 (Next.js)
+  cd C:\Users\tara0\readvoice-mvp
+  npm run dev
+
+  5단계: 브라우저
+  http://localhost:3000
+
+  6단계: 오늘 TODO 읽기
+  cat docs/TODO_2026-05-01.md
+
+  ---
+  📝 매일 변경하는 부분 (간단 요약)
+
+  종료 시 (저녁)
+
+  # 오늘: 2026-04-30
+  # 내일: 2026-05-01
+
+  cat docs/TODO_2026-05-01.md  ← 내일 날짜
+
+  시작 시 (아침)
+
+  # 오늘: 2026-05-01
+
+  cat docs/TODO_2026-05-01.md  ← 오늘 날짜
+
+  ---
+  💡 핵심 정리
+
+  지금 끄기 전에
+
+  - Git Push 완료 ✅
+  - 내일 파일 확인 ✅
+    - docs/daily-checklist/2026-05-01_시작.txt
+    - docs/TODO_2026-05-01.md
+    - docs/daily-reports/2026-05-01-action-plan.md
+
+  내일 켜고 나서
+
+  1. docs/daily-checklist/2026-05-01_시작.txt 열기
+  2. 체크박스 따라 실행
+  3. 완료!
+
+  ---
+  🎯 이제 안심하고 끄셔도 됩니다!
+
+  모든 작업이 저장되었고, 내일 그대로 이어서 할 수 있도록 완벽하게 준비되었습니다.
+
+  좋은 밤 되세요! 🌙✨

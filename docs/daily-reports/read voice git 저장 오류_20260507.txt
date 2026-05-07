@@ -1,0 +1,21 @@
+PowerShell 7.6.1
+PS C:\Windows\System32> cd C:\Users\tara0\readvoice-mvp
+PS C:\Users\tara0\readvoice-mvp> git status
+On branch master
+Your branch is up to date with 'origin/master'.
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   "public/ReadVoice_Upload/~$\353\263\204 \354\235\264\353\257\270\354\247\200 \355\205\215\354\212\244\355\212\270 \354\213\234\355\227\230 \352\262\260\352\263\274.docx"
+        modified:   "public/ReadVoice_Upload/\353\252\250\353\215\270\353\263\204 \354\235\264\353\257\270\354\247\200 \355\205\215\354\212\244\355\212\270 \354\213\234\355\227\230 \352\262\260\352\263\274.docx"
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        "docs/daily-reports/\352\263\204\354\240\225 \354\240\204\355\231\230 \354\213\234\354\212\244\355\205\234 \354\231\204\354\204\261.txt"
+        "docs/daily-reports/\353\202\264\354\235\274 \354\236\221\354\227\205 \355\224\214\353\236\234 - 5\354\233\224 1\354\235\274 \353\230\220\353\212\224 5\354\233\224 6\354\235\274..txt"
+        "docs/daily-reports/\354\242\205\353\243\214\354\213\234 \352\260\200\354\235\264\353\223\234.txt"
+
+no changes added to commit (use "git add" and/or "git commit -a")
+PS C:\Users\tara0\readvoice-mvp> git add -A
+PS C:\Users\tara0\readvoice-mvp>

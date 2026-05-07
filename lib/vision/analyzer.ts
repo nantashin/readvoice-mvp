@@ -2,8 +2,10 @@ export type VisionModel =
   | "gemma4:e2b"
   | "gemma4:e4b"
   | "qwen3.5:9b"
+  | "qwen3.5:9b-image" // 이미지용 UI ID
   | "llama3.2-vision:11b-instruct-q4_K_M"
   | "glm-ocr"
+  | "glm-ocr-image" // 이미지용 UI ID
   | "richardyoung/olmocr2:7b-q8"
 
 export interface AnalysisResult {
@@ -45,20 +47,27 @@ export async function analyzeFile(
     const base64 = await compressImage(file, model)
     const compressedBlob = await (await fetch(`data:image/jpeg;base64,${base64}`)).blob()
     formData.append("file", new File([compressedBlob], file.name, { type: "image/jpeg" }))
+    console.log("[Analyzer] 압축 완료, 크기:", compressedBlob.size)
   } else {
     formData.append("file", file)
   }
 
   formData.append("model", model)
+  console.log("[Analyzer] FormData에 추가된 모델:", model)
   if (mode) {
     formData.append("mode", mode)
+    console.log("[Analyzer] FormData에 추가된 모드:", mode)
   }
 
   try {
+    console.log("[Analyzer] /api/ocr 호출 시작...")
     const res = await fetch("/api/ocr", { method: "POST", body: formData })
+    console.log("[Analyzer] /api/ocr 응답 상태:", res.status, res.statusText)
     const data = await res.json()
+    console.log("[Analyzer] /api/ocr 응답 데이터:", data)
 
     if (!res.ok) {
+      console.error("[Analyzer] API 에러:", data.error)
       return {
         text: "",
         error: data.error ?? "파일 처리 중 오류가 발생했습니다.",
@@ -66,12 +75,14 @@ export async function analyzeFile(
       }
     }
 
+    console.log("[Analyzer] 분석 성공, 텍스트 길이:", data.text?.length)
     return {
       text: data.text,
       original: data.original, // 이미지 분석일 경우 영문 원본
       classification,
     }
-  } catch {
+  } catch (e) {
+    console.error("[Analyzer] 네트워크 예외:", e)
     return {
       text: "",
       error: "네트워크 오류가 발생했습니다. 다시 시도해주세요.",

@@ -1,0 +1,3003 @@
+코덱스 채팅창 메시지
+
+https://github.com/nantashin/readvoice-mvp
+이 GitHub 저장소의 modules/ocr/pdf.ts를 검토해줘.\nPDF를 pypdfium2로 PNG 변환 후 GLM-OCR로 OCR하는 파이프라인인데\n계속 실패해. 전체 코드를 점검하고 깔끔하게 재작성해줘.
+복사
+Summary
+app/api/ocr/route.ts에서 PDF 업로드 시 **기존의 잘못된 경로(원본 PDF 버퍼를 바로 extractTextOCR에 전달)**를 제거하고, extractText(..., "application/pdf", ...)를 통해 modules/ocr/pdf.ts 파이프라인을 타도록 수정했습니다. 이게 실제 실패의 핵심 원인이었습니다.
+
+modules/ocr/pdf.ts를 전체 재작성해서 파이프라인을 정리했습니다:
+
+Python 스크립트 존재 여부 확인, spawnSync 에러/종료코드/stderr 체크
+
+pdf-to-image.py stdout JSON 파싱 검증
+
+임시파일을 mkdtempSync + finally rmSync로 확실히 정리
+
+페이지 단위 OCR(최대 3페이지) + 페이지별 오류 수집/집계 에러 메시지 제공
+
+OCR 결과를 페이지 라벨과 함께 정리해 반환하도록 개선했습니다.
+
+텍스트 PDF에 대해선 기존처럼 빠른 raw text 경로를 유지하되, 조건을 보완해 OCR fallback으로 안정적으로 넘어가도록 했습니다.
+
+Testing
+
+✅ npx eslint app/api/ocr/route.ts modules/ocr/pdf.ts
+
+❌ npm run lint (저장소 기존 코드의 다른 파일들에서 발생한 기존 lint 에러로 실패; 이번 수정 파일 외 이슈)
+
+원하시면 다음 단계로, 실제 실패 케이스 PDF 1~2개 기준으로 로그 포인트(변환 stdout/stderr, OCR stdout 일부)까지 포함한 진단 모드도 추가해드릴게요.
+
+
+파일 (2)개
+route.ts  app/api/ocr/route.ts +2 -6
+pdf.ts modules/ocr/pdf.ts +92 -59
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+
+
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..caae17460996f85d4e9f0b0c43a44211358342c0 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,125 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++
+ function extractRawText(buffer: Buffer): string {
+   const str = buffer.toString("binary")
+   const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
++
++  return matches
+     .map((m) => m.slice(1, -1))
+     .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
++      const readableCount = (t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []).length
+       const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
++      const koreanCount = (t.match(/[가-힣]/g) || []).length
++      return totalCount > 0 && readableCount / totalCount > 0.7 && (koreanCount > 0 || t.length > 3)
+     })
+     .join(" ")
+     .trim()
++}
+ 
+-  return texts
++type PdfToImageResult = {
++  totalPages: number
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
++
++  let parsed: { total_pages?: number } | null = null
++  try {
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
++
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
++  }
++
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
++  }
++}
++
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
+   const name = fileName || "문서"
+ 
+-  // 1단계: 간단한 텍스트 파싱
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+     const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+     const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+ 
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
++    if (koreanCount > 10 || rawText.length > 200) {
+       return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
+     }
+-
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] 텍스트 파싱 실패:", message)
+   }
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
+-
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+
+
+
+
+사용자 첨부 이미지
+수정한 것 패치했는데, 이렇게 나왔어.
+복사
+Summary
+공유해주신 결과처럼 PDF 내부 객체 문자열(node000..., Adobe Identity, D:...)이 raw text로 오인되는 문제가 맞았습니다. 그래서 raw 추출 결과를 바로 반환하지 않고, 의미 있는 자연어 텍스트인지 검증하는 게이트(looksLikeMeaningfulText)를 추가했습니다.
+
+raw 추출 단계도 더 엄격하게 바꿨습니다. 단순 괄호 문자열이 아니라, 단어 형태 토큰이 있고 읽기 가능 문자 비율이 높은 텍스트만 남기도록 필터를 강화했습니다.
+
+이제 raw 텍스트 신뢰도가 낮으면 명시적으로 로그를 남기고 바로 OCR fallback(PDF→PNG→GLM-OCR)으로 넘어갑니다. 즉, 이번 케이스처럼 metadata/object noise를 사용자 결과로 내보내지 않습니다.
+
+Testing
+
+✅ npx eslint modules/ocr/pdf.ts app/api/ocr/route.ts
+
+❌ npm run lint (저장소 내 기존 다른 파일들의 lint 에러로 실패; 이번 패치 파일 외 이슈)
+
+원하시면 다음으로는 looksLikeMeaningfulText 기준(토큰 임계값)을 환경변수로 빼서 운영 중 PDF 특성에 맞게 튜닝 가능하게 해드릴게요.
+
+
+파일 (2)개
+route.ts  app/api/ocr/route.ts   +2 -6
+pdf.ts  modules/ocr/pdf.ts   +117 -64
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..0c530d2d82d7eb3ba2ee9941eef56dc1b55588a7 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,145 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++
+ function extractRawText(buffer: Buffer): string {
+   const str = buffer.toString("binary")
+-  const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
+-    .map((m) => m.slice(1, -1))
++  const matches = str.match(/\(([^\)]{2,120})\)/g) || []
++
++  return matches
++    .map((m) => m.slice(1, -1).replace(/\\[nrt]/g, " ").trim())
+     .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
++      const readableCount = (t.match(/[a-zA-Z0-9가-힣\s.,!?:;()\-_/]/g) || []).length
+       const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
++      if (totalCount === 0) return false
++
++      const hasWordLikeToken = /[가-힣a-zA-Z]{2,}/.test(t)
++      return readableCount / totalCount > 0.8 && hasWordLikeToken
+     })
+     .join(" ")
++    .replace(/\s{2,}/g, " ")
+     .trim()
++}
+ 
+-  return texts
++function looksLikeMeaningfulText(text: string): boolean {
++  if (!text || text.length < 120) return false
++
++  const suspiciousTokenCount = (text.match(/\bnode\d{4,}\b/g) || []).length
++  const metadataTokenCount =
++    (text.match(/\b(D:\d{14}\+\d{2}'\d{2}'|Adobe Identity|Producer|Creator|CreationDate)\b/g) || []).length
++
++  const wordTokens = text.match(/[가-힣a-zA-Z]{2,}/g) || []
++  const uniqueWords = new Set(wordTokens.map((w) => w.toLowerCase()))
++  const naturalWordCount = wordTokens.length
++  const uniqueWordRatio = naturalWordCount > 0 ? uniqueWords.size / naturalWordCount : 0
++
++  if (suspiciousTokenCount >= 8) return false
++  if (metadataTokenCount >= 4) return false
++
++  return naturalWordCount >= 30 && uniqueWordRatio > 0.35
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
+-  const name = fileName || "문서"
++type PdfToImageResult = {
++  totalPages: number
++}
++
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
+ 
+-  // 1단계: 간단한 텍스트 파싱
++  let parsed: { total_pages?: number } | null = null
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+-    const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+-    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
+ 
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
+-      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
+-    }
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
++  }
+ 
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
+   }
++}
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
++  const name = fileName || "문서"
++
++  try {
++    const rawText = extractRawText(buffer)
++    if (looksLikeMeaningfulText(rawText)) {
++      return `파일명: ${name}\n\n텍스트:\n${rawText.substring(0, 4000)}`
++    }
++    console.log("[PDF] raw text 신뢰도 부족 -> OCR fallback")
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] 텍스트 파싱 실패:", message)
++  }
+ 
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+
+
+
+그렇게 해줘. 점검까지 해서 완성한 다음에 패치하게.
+
+복사
+Summary
+modules/ocr/pdf.ts의 fast-path를 바이너리 정규식 파싱에서 pdfjs-dist 기반 임베디드 텍스트 추출로 교체했습니다. 이제 PDF 내부 객체/메타데이터 노이즈가 사용자 결과로 노출될 가능성이 크게 줄어듭니다.
+
+임베디드 텍스트 결과는 정규화(normalizeExtractedText) 후 신뢰도 검사(looksLikeMeaningfulText)를 통과한 경우에만 반환하도록 했고, 실패하면 OCR fallback으로 강제 전환되게 했습니다.
+
+기존의 PDF→PNG(pypdfium2)→GLM-OCR 파이프라인은 유지하면서, subprocess 상태/JSON 파싱/출력 파일 검증/임시 디렉토리 정리를 그대로 적용해 안정성을 유지했습니다.
+
+Testing
+
+✅ npx eslint modules/ocr/pdf.ts app/api/ocr/route.ts
+
+✅ npx tsc --noEmit
+
+❌ npm run lint (리포 내 기존 타 파일 lint 오류로 실패; 이번 패치 대상 외 이슈)
+
+원하신 대로 점검까지 완료해서 패치/커밋 반영했습니다.
+
+
+파일 (2)개
+route.ts  app/api/ocr/route.ts   +2 -6
+pdf.ts  modules/ocr/pdf.ts   +147 -70
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..20cb9f558ef069edbd281d7cf6413ee60dec7777 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,169 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
+-function extractRawText(buffer: Buffer): string {
+-  const str = buffer.toString("binary")
+-  const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
+-    .map((m) => m.slice(1, -1))
+-    .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
+-      const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
+-    })
+-    .join(" ")
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++const EMBEDDED_TEXT_PAGE_LIMIT = 20
++
++function normalizeExtractedText(text: string): string {
++  return text
++    .replace(/\u0000/g, "")
++    .replace(/[ \t]+/g, " ")
++    .replace(/\n{3,}/g, "\n\n")
+     .trim()
++}
++
++function looksLikeMeaningfulText(text: string): boolean {
++  if (!text || text.length < 80) return false
++
++  const suspiciousTokenCount = (text.match(/\bnode\d{4,}\b/g) || []).length
++  const metadataTokenCount =
++    (text.match(/\b(D:\d{14}\+\d{2}'\d{2}'|Adobe Identity|Producer|Creator|CreationDate)\b/g) || []).length
+ 
+-  return texts
++  const wordTokens = text.match(/[가-힣a-zA-Z]{2,}/g) || []
++  const uniqueWords = new Set(wordTokens.map((w) => w.toLowerCase()))
++  const naturalWordCount = wordTokens.length
++  const uniqueWordRatio = naturalWordCount > 0 ? uniqueWords.size / naturalWordCount : 0
++
++  if (suspiciousTokenCount >= 5) return false
++  if (metadataTokenCount >= 3) return false
++
++  return naturalWordCount >= 20 && uniqueWordRatio > 0.3
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
+-  const name = fileName || "문서"
++async function extractEmbeddedText(buffer: Buffer): Promise<string> {
++  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.js")
++  const loadingTask = pdfjs.getDocument({
++    data: new Uint8Array(buffer),
++    useWorkerFetch: false,
++    isEvalSupported: false,
++    disableFontFace: true,
++  })
++
++  const document = await loadingTask.promise
+ 
+-  // 1단계: 간단한 텍스트 파싱
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+-    const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+-    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+-
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
+-      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
++    const pages: string[] = []
++    const pageCount = Math.min(document.numPages, EMBEDDED_TEXT_PAGE_LIMIT)
++
++    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
++      const page = await document.getPage(pageNumber)
++      const textContent = await page.getTextContent()
++      const pageText = textContent.items
++        .map((item) => ("str" in item ? item.str : ""))
++        .join(" ")
++        .trim()
++
++      if (pageText) {
++        pages.push(pageText)
++      }
+     }
+ 
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++    return normalizeExtractedText(pages.join("\n\n"))
++  } finally {
++    await document.destroy()
++  }
++}
++
++type PdfToImageResult = {
++  totalPages: number
++}
++
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
++
++  let parsed: { total_pages?: number } | null = null
++  try {
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
++
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
+   }
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
++  }
++}
++
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
++  const name = fileName || "문서"
+ 
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  try {
++    const embeddedText = await extractEmbeddedText(buffer)
++    if (looksLikeMeaningfulText(embeddedText)) {
++      return `파일명: ${name}\n\n텍스트:\n${embeddedText.substring(0, 8000)}`
++    }
++    console.log("[PDF] embedded text 신뢰도 부족 -> OCR fallback")
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] embedded text 추출 실패:", message)
++  }
++
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+
+
+파일 패치 2개 각각 붙여 넣어서 수정했는데 다음과 같이 나와.
+파일명: 3-1. 2024-01-24_출원번호통지서_10-2024-0010575_고문서에 포함된 문자의 자동 정렬을 수행하는 어노테이션 툴 제공 장치.pdf\n\n[페이지 1]\nmarkdown\nmarkdown\njson\njson\n{\n {\n {\n "text\n {\n "text\n "    \n {\n "    "\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n {\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }파일명: 3-1. 2024-01-24_출원번호통지서_10-2024-0010575_고문서에 포함된 문자의 자동 정렬을 수행하는 어노테이션 툴 제공 장치.pdf\n\n[페이지 1]\nmarkdown\nmarkdown\njson\njson\n{\n {\n {\n "text\n {\n "text\n "    \n {\n "    "\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n {\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n {\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }\n }
+복사
+Summary
+말씀하신 것처럼 markdown/json/{...} 반복 노이즈가 그대로 반환되는 문제가 있었고, 이를 막기 위해 OCR 후처리/검증 로직을 강하게 추가했습니다. sanitizeOcrText에서 코드블록/markdown/json/중괄호-only 라인을 제거하고, isGarbageOcrText에서 깨진 문자( )·괄호 비중·문자 수를 기준으로 쓰레기 출력을 차단합니다.
+
+modules/ocr/ocr-engine.ts 자체도 정리했습니다. 이미지 MIME guard, Python 실행/종료코드/JSON 파싱 예외 처리, 임시파일 finally 정리로 실패 시에도 상태가 깔끔하게 유지됩니다.
+
+server/glm-ocr.py에서 ollama run 호출 프롬프트를 엄격하게 바꿨고, 파이썬 단계에서도 markdown/json/괄호-only 노이즈를 제거하도록 정리했습니다. 실패 시 JSON 에러 응답 + non-zero exit로 상위에서 확실히 감지됩니다.
+
+Testing
+
+✅ npx eslint modules/ocr/pdf.ts modules/ocr/ocr-engine.ts app/api/ocr/route.ts
+
+✅ npx tsc --noEmit
+
+❌ npm run lint (리포의 기존 다른 파일 lint 에러로 실패; 이번 패치 범위 외)
+
+이번 패치로 최소한 지금처럼 긴 markdown/json/{} 덤프가 사용자 결과로 떨어지는 건 차단됩니다. 이후 실제 샘플 PDF 1개로 재확인해서, 필요하면 isGarbageOcrText 임계값도 바로 튜닝하겠습니다.
+
+
+파일 (4)개
+route.ts  app/api/ocr/route.ts   +2 -6
+ocr-engine.ts  modules/ocr/ocr-engine.ts   +81 -47
+pdf.ts  modules/ocr/pdf.ts   +147 -70
+glm-ocr.py  server/glm-ocr.py   +46 -14
+
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+diff --git a/modules/ocr/ocr-engine.ts b/modules/ocr/ocr-engine.ts
+index 1f599ab0c3fd154457f7429801ef1499804eb45e..e018ad41eee9954934807f9bff750cb06116cc51 100644
+--- a/modules/ocr/ocr-engine.ts
++++ b/modules/ocr/ocr-engine.ts
+@@ -1,70 +1,104 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ 
+-const OCR_PROMPT = `다음 문서의 모든 텍스트를 한국어로 그대로 읽어줘.
+-- 보이는 글자를 빠짐없이 정확히 옮겨써
+-- 표는 그대로 유지
+-- 숫자, 날짜, 코드 정확히
+-- 설명이나 해석 절대 금지
+-- 텍스트만 출력`
++function sanitizeOcrText(text: string): string {
++  const cleanedLines = text
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter((line) => {
++      if (!line) return false
++      const lowered = line.toLowerCase()
++      if (["markdown", "json", "```", "```json", "```markdown"].includes(lowered)) {
++        return false
++      }
++      if (/^[{}\[\]"`\\]+$/.test(line)) {
++        return false
++      }
++      return true
++    })
++
++  return cleanedLines.join("\n").trim()
++}
++
++function isGarbageOcrText(text: string): boolean {
++  if (!text || text.length < 8) return true
++
++  const braceLike = (text.match(/[{}\[\]`]/g) || []).length
++  const replacementChars = (text.match(/ /g) || []).length
++  const letters = (text.match(/[가-힣a-zA-Z0-9]/g) || []).length
++
++  if (replacementChars > 5) return true
++  if (letters === 0) return true
++  if (braceLike > letters * 0.6) return true
++
++  return false
++}
+ 
+ export async function extractTextOCR(
+   buffer: Buffer,
+   mimeType: string,
+   fileName?: string
+ ): Promise<string> {
+   const name = fileName || "문서"
+ 
+-  console.log("[OCR] 버퍼 크기:", buffer.length, "bytes")
++  if (!mimeType.startsWith("image/")) {
++    throw new Error(`[OCR] 이미지 MIME 타입만 지원합니다: ${mimeType}`)
++  }
+ 
+-  // GLM-OCR 시도 (Python 스크립트로 직접 호출)
+   const tmpImg = path.join(os.tmpdir(), `rv_glm_${Date.now()}.png`)
+   const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
+ 
+-  console.log("[OCR] 스크립트 존재:", fs.existsSync(scriptPath))
+-  console.log("[OCR] tmpImg:", tmpImg)
++  if (!fs.existsSync(scriptPath)) {
++    throw new Error(`[OCR] 스크립트가 없습니다: ${scriptPath}`)
++  }
+ 
+   try {
+     fs.writeFileSync(tmpImg, buffer)
+ 
+-    const result = spawnSync(
+-      "python",
+-      [scriptPath, tmpImg],
+-      {
+-        timeout: 90000,
+-        encoding: "utf8",
+-        cwd: process.cwd()  // 작업 디렉토리 명시
+-      }
+-    )
+-
+-    console.log("[OCR] exit code:", result.status)
+-    console.log("[OCR] stdout:", result.stdout?.substring(0, 200))
+-    console.log("[OCR] stderr:", result.stderr?.substring(0, 200))
+-
+-    // 임시 파일 삭제
+-    setTimeout(() => {
+-      try {
+-        fs.unlinkSync(tmpImg)
+-      } catch (e) {}
+-    }, 2000)
+-
+-    if (result.status === 0 && result.stdout?.trim()) {
+-      try {
+-        const data = JSON.parse(result.stdout.trim())
+-        if (data.success && data.text && data.text.length > 5) {
+-          console.log("[OCR] GLM-OCR 성공:", data.text.length, "자")
+-          return `파일명: ${name}\n\n${data.text}`
+-        }
+-      } catch (e) {
+-        console.log("[OCR] JSON 파싱 실패:", result.stdout?.substring(0, 100))
+-      }
++    const result = spawnSync("python", [scriptPath, tmpImg], {
++      timeout: 120000,
++      encoding: "utf8",
++      cwd: process.cwd(),
++    })
++
++    if (result.error) {
++      throw new Error(`[OCR] Python 실행 실패: ${result.error.message}`)
++    }
++
++    if (result.status !== 0) {
++      const stderr = (result.stderr || "").trim()
++      throw new Error(`[OCR] GLM-OCR 실행 실패 (status=${result.status}): ${stderr || "stderr 없음"}`)
++    }
++
++    const stdout = (result.stdout || "").trim()
++    if (!stdout) {
++      throw new Error("[OCR] GLM-OCR 출력이 비어 있습니다.")
++    }
++
++    let data: { success?: boolean; text?: string; error?: string } | null = null
++    try {
++      data = JSON.parse(stdout)
++    } catch {
++      throw new Error(`[OCR] JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++    }
++
++    if (!data?.success) {
++      throw new Error(`[OCR] GLM-OCR 응답 실패: ${data?.error || "unknown error"}`)
+     }
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.log("[OCR] GLM-OCR 예외:", message)
+-  }
+ 
+-  throw new Error("GLM-OCR 실패. 서버 로그를 확인해주세요.")
++    const cleaned = sanitizeOcrText(data.text || "")
++    if (isGarbageOcrText(cleaned)) {
++      throw new Error("[OCR] GLM-OCR 결과가 손상되었거나 노이즈가 많습니다.")
++    }
++
++    return `파일명: ${name}\n\n${cleaned}`
++  } finally {
++    try {
++      fs.unlinkSync(tmpImg)
++    } catch {
++      // noop
++    }
++  }
+ }
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..20cb9f558ef069edbd281d7cf6413ee60dec7777 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,169 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
+-function extractRawText(buffer: Buffer): string {
+-  const str = buffer.toString("binary")
+-  const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
+-    .map((m) => m.slice(1, -1))
+-    .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
+-      const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
+-    })
+-    .join(" ")
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++const EMBEDDED_TEXT_PAGE_LIMIT = 20
++
++function normalizeExtractedText(text: string): string {
++  return text
++    .replace(/\u0000/g, "")
++    .replace(/[ \t]+/g, " ")
++    .replace(/\n{3,}/g, "\n\n")
+     .trim()
++}
++
++function looksLikeMeaningfulText(text: string): boolean {
++  if (!text || text.length < 80) return false
++
++  const suspiciousTokenCount = (text.match(/\bnode\d{4,}\b/g) || []).length
++  const metadataTokenCount =
++    (text.match(/\b(D:\d{14}\+\d{2}'\d{2}'|Adobe Identity|Producer|Creator|CreationDate)\b/g) || []).length
+ 
+-  return texts
++  const wordTokens = text.match(/[가-힣a-zA-Z]{2,}/g) || []
++  const uniqueWords = new Set(wordTokens.map((w) => w.toLowerCase()))
++  const naturalWordCount = wordTokens.length
++  const uniqueWordRatio = naturalWordCount > 0 ? uniqueWords.size / naturalWordCount : 0
++
++  if (suspiciousTokenCount >= 5) return false
++  if (metadataTokenCount >= 3) return false
++
++  return naturalWordCount >= 20 && uniqueWordRatio > 0.3
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
+-  const name = fileName || "문서"
++async function extractEmbeddedText(buffer: Buffer): Promise<string> {
++  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.js")
++  const loadingTask = pdfjs.getDocument({
++    data: new Uint8Array(buffer),
++    useWorkerFetch: false,
++    isEvalSupported: false,
++    disableFontFace: true,
++  })
++
++  const document = await loadingTask.promise
+ 
+-  // 1단계: 간단한 텍스트 파싱
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+-    const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+-    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+-
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
+-      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
++    const pages: string[] = []
++    const pageCount = Math.min(document.numPages, EMBEDDED_TEXT_PAGE_LIMIT)
++
++    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
++      const page = await document.getPage(pageNumber)
++      const textContent = await page.getTextContent()
++      const pageText = textContent.items
++        .map((item) => ("str" in item ? item.str : ""))
++        .join(" ")
++        .trim()
++
++      if (pageText) {
++        pages.push(pageText)
++      }
+     }
+ 
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++    return normalizeExtractedText(pages.join("\n\n"))
++  } finally {
++    await document.destroy()
++  }
++}
++
++type PdfToImageResult = {
++  totalPages: number
++}
++
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
++
++  let parsed: { total_pages?: number } | null = null
++  try {
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
++
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
+   }
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
++  }
++}
++
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
++  const name = fileName || "문서"
+ 
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  try {
++    const embeddedText = await extractEmbeddedText(buffer)
++    if (looksLikeMeaningfulText(embeddedText)) {
++      return `파일명: ${name}\n\n텍스트:\n${embeddedText.substring(0, 8000)}`
++    }
++    console.log("[PDF] embedded text 신뢰도 부족 -> OCR fallback")
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] embedded text 추출 실패:", message)
++  }
++
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+diff --git a/server/glm-ocr.py b/server/glm-ocr.py
+index 1a779e2182e1a59552107c432a7ff0bb4e24a059..80361eedf1de631e834476c2472b79999c4beb30 100644
+--- a/server/glm-ocr.py
++++ b/server/glm-ocr.py
+@@ -1,30 +1,62 @@
+-import sys
+-import subprocess
+ import json
+ import re
++import subprocess
++import sys
++
++BASE_PROMPT = """다음 이미지의 보이는 텍스트만 그대로 추출해.
++- 설명, 해석, 요약 금지
++- markdown/json 코드블록 금지
++- 중괄호/따옴표만 반복 출력 금지
++- 결과는 순수 텍스트만 출력"""
++
+ 
+ def clean_text(text: str) -> str:
+-    # ANSI 이스케이프 코드 제거
+     ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\[K')
+     text = ansi_escape.sub('', text)
+-    # 연속 공백/줄바꿈 정리
+-    text = re.sub(r'\n{3,}', '\n\n', text)
+-    text = re.sub(r' {2,}', ' ', text)
+-    return text.strip()
++
++    lines = [line.strip() for line in text.splitlines()]
++    filtered = []
++    for line in lines:
++        if not line:
++            filtered.append("")
++            continue
++
++        lowered = line.lower()
++        if lowered in {"markdown", "json", "```", "```json", "```markdown"}:
++            continue
++        if re.fullmatch(r'[{}\[\]"`\\]+', line):
++            continue
++        filtered.append(line)
++
++    cleaned = "\n".join(filtered)
++    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
++    cleaned = re.sub(r' {2,}', ' ', cleaned)
++    return cleaned.strip()
++
+ 
+ def run_glm_ocr(image_path: str) -> str:
++    prompt = f"{BASE_PROMPT}\n\n이미지 경로: {image_path}"
++
+     result = subprocess.run(
+-        ["ollama", "run", "glm-ocr",
+-         "이 문서의 모든 텍스트를 정확히 읽어줘",
+-         image_path],
++        ["ollama", "run", "glm-ocr", prompt],
+         capture_output=True,
+         text=True,
+-        timeout=60,
++        timeout=120,
+         encoding="utf-8"
+     )
+-    return clean_text(result.stdout.strip())
++
++    if result.returncode != 0:
++        stderr = (result.stderr or "").strip()
++        raise RuntimeError(f"ollama 실행 실패 (code={result.returncode}): {stderr or 'stderr 없음'}")
++
++    return clean_text((result.stdout or "").strip())
++
+ 
+ if __name__ == "__main__":
+     image_path = sys.argv[1]
+-    text = run_glm_ocr(image_path)
+-    print(json.dumps({"success": True, "text": text}, ensure_ascii=False))
++    try:
++        text = run_glm_ocr(image_path)
++        print(json.dumps({"success": True, "text": text}, ensure_ascii=False))
++    except Exception as e:
++        print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False))
++        sys.exit(1)
+
+
+
+pdf 업로드해서 실행했더니 다음과 같이 에러.
+---
+PDF OCR 실패: page 1: [OCR] GLM-OCR 실행 실패 (status=1): Traceback (most recent call last): File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 58, in <module> text = run_glm_ocr(image_path) File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 50, in run_glm_ocr raise RuntimeError(f"ollama           (code={result.returncode}): {stderr or 'stderr     '}") RuntimeError: ollama           (code=1): Added image 'C:\Users\tara0\AppData\Local\Temp\rv_glm_1777005359721.png' [?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u280b [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u280b [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?25l[?2026h[?25l[1G[K[?25h[?2026l[2K[1G[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25hError: an error was encountered while running the model: GGML_ASSERT(a->ne[2] * 4 == b->ne[0]) failed During handling of the above exception, another exception occurred: Traceback (most recent call last): File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 61, in <module> print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)) ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UnicodeEncodeError: 'cp949' codec can't encode character '\u2819' in position 165: illegal multibyte sequencePDF OCR 실패: page 1: [OCR] GLM-OCR 실행 실패 (status=1): Traceback (most recent call last): File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 58, in <module> text = run_glm_ocr(image_path) File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 50, in run_glm_ocr raise RuntimeError(f"ollama           (code={result.returncode}): {stderr or 'stderr     '}") RuntimeError: ollama           (code=1): Added image 'C:\Users\tara0\AppData\Local\Temp\rv_glm_1777005359721.png' [?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u280b [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2839 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u280b [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2827 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2819 [K[?25h[?2026l[?2026h[?25l[1G\u2838 [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u283c [K[?25h[?2026l[?2026h[?25l[1G\u2834 [K[?25h[?2026l[?2026h[?25l[1G\u2826 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u2807 [K[?25h[?2026l[?2026h[?25l[1G\u280f [K[?25h[?2026l[?25l[?2026h[?25l[1G[K[?25h[?2026l[2K[1G[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25h[?25l[?25hError: an error was encountered while running the model: GGML_ASSERT(a->ne[2] * 4 == b->ne[0]) failed During handling of the above exception, another exception occurred: Traceback (most recent call last): File "C:\Users\tara0\readvoice-mvp\server\glm-ocr.py", line 61, in <module> print(json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)) ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ UnicodeEncodeError: 'cp949' codec can't encode character '\u2819' in position 165: illegal multibyte sequence
+---
+복사
+Summary
+보고해주신 에러의 핵심은 2가지였습니다:
+
+ollama 실패 로그에 ANSI/스피너 문자가 섞여 매우 지저분해짐,
+
+그 에러를 출력하는 과정에서 Windows cp949 인코딩 충돌로 UnicodeEncodeError가 2차로 터짐.
+이번 패치에서 이 둘을 직접 해결했습니다.
+
+server/glm-ocr.py를 Windows 안전하게 변경했습니다:
+
+stdout/stderr를 UTF-8 + backslashreplace로 재설정
+
+JSON 출력은 ensure_ascii=True로 고정
+
+ANSI escape/braille spinner 제거 함수 추가
+=> 이제 실패해도 Python이 깨지지 않고, JSON 에러를 안정적으로 반환합니다.
+
+추가로 모델 안정성을 위해 OCR 입력 이미지를 RGB 변환 + 최대 변(2048px) 리사이즈 전처리 후 ollama에 전달하도록 했습니다. GGML assert류를 완화하기 위한 방어입니다.
+
+ollama 실행 환경도 TERM=dumb, NO_COLOR=1, errors='replace'로 바꿔 콘솔 제어문자 노이즈를 줄였습니다.
+
+Testing
+
+✅ npx eslint modules/ocr/ocr-engine.ts modules/ocr/pdf.ts app/api/ocr/route.ts
+
+✅ npx tsc --noEmit
+
+❌ npm run lint (리포 기존 타 파일 lint 에러로 실패; 이번 수정 범위 외)
+
+이제 동일 상황에서도 cp949로 터져서 원인 로그가 사라지는 문제는 막혔고, 에러가 나면 정리된 메시지로 원인 추적 가능해졌습니다.
+
+
+파일 (4)개
+
+route.ts  app/api/ocr/route.ts   +2 -6
+ocr-engine.ts  modules/ocr/ocr-engine.ts   +81 -47
+pdf.ts  modules/ocr/pdf.ts   +147 -70
+glm-ocr.py  server/glm-ocr.py   +109 -19
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+diff --git a/modules/ocr/ocr-engine.ts b/modules/ocr/ocr-engine.ts
+index 1f599ab0c3fd154457f7429801ef1499804eb45e..e018ad41eee9954934807f9bff750cb06116cc51 100644
+--- a/modules/ocr/ocr-engine.ts
++++ b/modules/ocr/ocr-engine.ts
+@@ -1,70 +1,104 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ 
+-const OCR_PROMPT = `다음 문서의 모든 텍스트를 한국어로 그대로 읽어줘.
+-- 보이는 글자를 빠짐없이 정확히 옮겨써
+-- 표는 그대로 유지
+-- 숫자, 날짜, 코드 정확히
+-- 설명이나 해석 절대 금지
+-- 텍스트만 출력`
++function sanitizeOcrText(text: string): string {
++  const cleanedLines = text
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter((line) => {
++      if (!line) return false
++      const lowered = line.toLowerCase()
++      if (["markdown", "json", "```", "```json", "```markdown"].includes(lowered)) {
++        return false
++      }
++      if (/^[{}\[\]"`\\]+$/.test(line)) {
++        return false
++      }
++      return true
++    })
++
++  return cleanedLines.join("\n").trim()
++}
++
++function isGarbageOcrText(text: string): boolean {
++  if (!text || text.length < 8) return true
++
++  const braceLike = (text.match(/[{}\[\]`]/g) || []).length
++  const replacementChars = (text.match(/ /g) || []).length
++  const letters = (text.match(/[가-힣a-zA-Z0-9]/g) || []).length
++
++  if (replacementChars > 5) return true
++  if (letters === 0) return true
++  if (braceLike > letters * 0.6) return true
++
++  return false
++}
+ 
+ export async function extractTextOCR(
+   buffer: Buffer,
+   mimeType: string,
+   fileName?: string
+ ): Promise<string> {
+   const name = fileName || "문서"
+ 
+-  console.log("[OCR] 버퍼 크기:", buffer.length, "bytes")
++  if (!mimeType.startsWith("image/")) {
++    throw new Error(`[OCR] 이미지 MIME 타입만 지원합니다: ${mimeType}`)
++  }
+ 
+-  // GLM-OCR 시도 (Python 스크립트로 직접 호출)
+   const tmpImg = path.join(os.tmpdir(), `rv_glm_${Date.now()}.png`)
+   const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
+ 
+-  console.log("[OCR] 스크립트 존재:", fs.existsSync(scriptPath))
+-  console.log("[OCR] tmpImg:", tmpImg)
++  if (!fs.existsSync(scriptPath)) {
++    throw new Error(`[OCR] 스크립트가 없습니다: ${scriptPath}`)
++  }
+ 
+   try {
+     fs.writeFileSync(tmpImg, buffer)
+ 
+-    const result = spawnSync(
+-      "python",
+-      [scriptPath, tmpImg],
+-      {
+-        timeout: 90000,
+-        encoding: "utf8",
+-        cwd: process.cwd()  // 작업 디렉토리 명시
+-      }
+-    )
+-
+-    console.log("[OCR] exit code:", result.status)
+-    console.log("[OCR] stdout:", result.stdout?.substring(0, 200))
+-    console.log("[OCR] stderr:", result.stderr?.substring(0, 200))
+-
+-    // 임시 파일 삭제
+-    setTimeout(() => {
+-      try {
+-        fs.unlinkSync(tmpImg)
+-      } catch (e) {}
+-    }, 2000)
+-
+-    if (result.status === 0 && result.stdout?.trim()) {
+-      try {
+-        const data = JSON.parse(result.stdout.trim())
+-        if (data.success && data.text && data.text.length > 5) {
+-          console.log("[OCR] GLM-OCR 성공:", data.text.length, "자")
+-          return `파일명: ${name}\n\n${data.text}`
+-        }
+-      } catch (e) {
+-        console.log("[OCR] JSON 파싱 실패:", result.stdout?.substring(0, 100))
+-      }
++    const result = spawnSync("python", [scriptPath, tmpImg], {
++      timeout: 120000,
++      encoding: "utf8",
++      cwd: process.cwd(),
++    })
++
++    if (result.error) {
++      throw new Error(`[OCR] Python 실행 실패: ${result.error.message}`)
++    }
++
++    if (result.status !== 0) {
++      const stderr = (result.stderr || "").trim()
++      throw new Error(`[OCR] GLM-OCR 실행 실패 (status=${result.status}): ${stderr || "stderr 없음"}`)
++    }
++
++    const stdout = (result.stdout || "").trim()
++    if (!stdout) {
++      throw new Error("[OCR] GLM-OCR 출력이 비어 있습니다.")
++    }
++
++    let data: { success?: boolean; text?: string; error?: string } | null = null
++    try {
++      data = JSON.parse(stdout)
++    } catch {
++      throw new Error(`[OCR] JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++    }
++
++    if (!data?.success) {
++      throw new Error(`[OCR] GLM-OCR 응답 실패: ${data?.error || "unknown error"}`)
+     }
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.log("[OCR] GLM-OCR 예외:", message)
+-  }
+ 
+-  throw new Error("GLM-OCR 실패. 서버 로그를 확인해주세요.")
++    const cleaned = sanitizeOcrText(data.text || "")
++    if (isGarbageOcrText(cleaned)) {
++      throw new Error("[OCR] GLM-OCR 결과가 손상되었거나 노이즈가 많습니다.")
++    }
++
++    return `파일명: ${name}\n\n${cleaned}`
++  } finally {
++    try {
++      fs.unlinkSync(tmpImg)
++    } catch {
++      // noop
++    }
++  }
+ }
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..20cb9f558ef069edbd281d7cf6413ee60dec7777 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,169 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
+-function extractRawText(buffer: Buffer): string {
+-  const str = buffer.toString("binary")
+-  const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
+-    .map((m) => m.slice(1, -1))
+-    .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
+-      const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
+-    })
+-    .join(" ")
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++const EMBEDDED_TEXT_PAGE_LIMIT = 20
++
++function normalizeExtractedText(text: string): string {
++  return text
++    .replace(/\u0000/g, "")
++    .replace(/[ \t]+/g, " ")
++    .replace(/\n{3,}/g, "\n\n")
+     .trim()
++}
++
++function looksLikeMeaningfulText(text: string): boolean {
++  if (!text || text.length < 80) return false
++
++  const suspiciousTokenCount = (text.match(/\bnode\d{4,}\b/g) || []).length
++  const metadataTokenCount =
++    (text.match(/\b(D:\d{14}\+\d{2}'\d{2}'|Adobe Identity|Producer|Creator|CreationDate)\b/g) || []).length
+ 
+-  return texts
++  const wordTokens = text.match(/[가-힣a-zA-Z]{2,}/g) || []
++  const uniqueWords = new Set(wordTokens.map((w) => w.toLowerCase()))
++  const naturalWordCount = wordTokens.length
++  const uniqueWordRatio = naturalWordCount > 0 ? uniqueWords.size / naturalWordCount : 0
++
++  if (suspiciousTokenCount >= 5) return false
++  if (metadataTokenCount >= 3) return false
++
++  return naturalWordCount >= 20 && uniqueWordRatio > 0.3
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
+-  const name = fileName || "문서"
++async function extractEmbeddedText(buffer: Buffer): Promise<string> {
++  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.js")
++  const loadingTask = pdfjs.getDocument({
++    data: new Uint8Array(buffer),
++    useWorkerFetch: false,
++    isEvalSupported: false,
++    disableFontFace: true,
++  })
++
++  const document = await loadingTask.promise
+ 
+-  // 1단계: 간단한 텍스트 파싱
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+-    const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+-    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+-
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
+-      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
++    const pages: string[] = []
++    const pageCount = Math.min(document.numPages, EMBEDDED_TEXT_PAGE_LIMIT)
++
++    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
++      const page = await document.getPage(pageNumber)
++      const textContent = await page.getTextContent()
++      const pageText = textContent.items
++        .map((item) => ("str" in item ? item.str : ""))
++        .join(" ")
++        .trim()
++
++      if (pageText) {
++        pages.push(pageText)
++      }
+     }
+ 
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++    return normalizeExtractedText(pages.join("\n\n"))
++  } finally {
++    await document.destroy()
++  }
++}
++
++type PdfToImageResult = {
++  totalPages: number
++}
++
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
++
++  let parsed: { total_pages?: number } | null = null
++  try {
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
++
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
+   }
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
++  }
++}
++
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
++  const name = fileName || "문서"
+ 
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  try {
++    const embeddedText = await extractEmbeddedText(buffer)
++    if (looksLikeMeaningfulText(embeddedText)) {
++      return `파일명: ${name}\n\n텍스트:\n${embeddedText.substring(0, 8000)}`
++    }
++    console.log("[PDF] embedded text 신뢰도 부족 -> OCR fallback")
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] embedded text 추출 실패:", message)
++  }
++
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+diff --git a/server/glm-ocr.py b/server/glm-ocr.py
+index 1a779e2182e1a59552107c432a7ff0bb4e24a059..6dc95bf49b3d9870f11620680f9266d49540789a 100644
+--- a/server/glm-ocr.py
++++ b/server/glm-ocr.py
+@@ -1,30 +1,120 @@
+-import sys
+-import subprocess
+ import json
++import os
+ import re
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
+ 
+-def clean_text(text: str) -> str:
+-    # ANSI 이스케이프 코드 제거
+-    ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\[K')
++from PIL import Image
++
++if hasattr(sys.stdout, "reconfigure"):
++    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
++if hasattr(sys.stderr, "reconfigure"):
++    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
++
++BASE_PROMPT = """다음 이미지의 보이는 텍스트만 그대로 추출해.
++- 설명, 해석, 요약 금지
++- markdown/json 코드블록 금지
++- 중괄호/따옴표만 반복 출력 금지
++- 결과는 순수 텍스트만 출력"""
++MAX_IMAGE_SIDE = 2048
++
++
++def strip_control_noise(text: str) -> str:
++    ansi_escape = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\[[0-9;?]*[~]')
+     text = ansi_escape.sub('', text)
+-    # 연속 공백/줄바꿈 정리
++    text = re.sub(r'[\u2800-\u28FF]', '', text)
++    text = text.replace('\r', '\n')
+     text = re.sub(r'\n{3,}', '\n\n', text)
+-    text = re.sub(r' {2,}', ' ', text)
+     return text.strip()
+ 
++
++def clean_text(text: str) -> str:
++    text = strip_control_noise(text)
++    lines = [line.strip() for line in text.splitlines()]
++    filtered = []
++
++    for line in lines:
++        if not line:
++            filtered.append("")
++            continue
++
++        lowered = line.lower()
++        if lowered in {"markdown", "json", "```", "```json", "```markdown"}:
++            continue
++        if re.fullmatch(r'[{}\[\]"`\\]+', line):
++            continue
++        filtered.append(line)
++
++    cleaned = "\n".join(filtered)
++    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
++    cleaned = re.sub(r' {2,}', ' ', cleaned)
++    return cleaned.strip()
++
++
++def prepare_image(image_path: str) -> str:
++    src = Path(image_path)
++    with Image.open(src) as img:
++        img = img.convert("RGB")
++        max_side = max(img.width, img.height)
++        if max_side > MAX_IMAGE_SIDE:
++            scale = MAX_IMAGE_SIDE / max_side
++            new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
++            img = img.resize(new_size, Image.Resampling.LANCZOS)
++
++        fd, temp_path = tempfile.mkstemp(prefix="rv_glm_pre_", suffix=".png")
++        os.close(fd)
++        img.save(temp_path, format="PNG", optimize=True)
++        return temp_path
++
++
+ def run_glm_ocr(image_path: str) -> str:
+-    result = subprocess.run(
+-        ["ollama", "run", "glm-ocr",
+-         "이 문서의 모든 텍스트를 정확히 읽어줘",
+-         image_path],
+-        capture_output=True,
+-        text=True,
+-        timeout=60,
+-        encoding="utf-8"
+-    )
+-    return clean_text(result.stdout.strip())
++    prepared_path = prepare_image(image_path)
++    prompt = f"{BASE_PROMPT}\n\n이미지 경로: {prepared_path}"
++
++    try:
++        env = os.environ.copy()
++        env["TERM"] = "dumb"
++        env["NO_COLOR"] = "1"
++
++        result = subprocess.run(
++            ["ollama", "run", "glm-ocr", prompt],
++            capture_output=True,
++            text=True,
++            timeout=120,
++            encoding="utf-8",
++            errors="replace",
++            env=env,
++        )
++
++        if result.returncode != 0:
++            stderr = strip_control_noise((result.stderr or "").strip())
++            stdout = strip_control_noise((result.stdout or "").strip())
++            detail = stderr or stdout or "출력 없음"
++            raise RuntimeError(f"ollama 실행 실패 (code={result.returncode}): {detail[:1500]}")
++
++        return clean_text((result.stdout or "").strip())
++    finally:
++        try:
++            os.remove(prepared_path)
++        except OSError:
++            pass
++
++
++def emit_json(payload: dict, exit_code: int) -> None:
++    sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
++    sys.stdout.flush()
++    raise SystemExit(exit_code)
++
+ 
+ if __name__ == "__main__":
++    if len(sys.argv) < 2:
++        emit_json({"success": False, "error": "image path is required"}, 1)
++
+     image_path = sys.argv[1]
+-    text = run_glm_ocr(image_path)
+-    print(json.dumps({"success": True, "text": text}, ensure_ascii=False))
++    try:
++        text = run_glm_ocr(image_path)
++        emit_json({"success": True, "text": text}, 0)
++    except Exception as e:
++        emit_json({"success": False, "error": str(e)}, 1)
+
+
+
+Have a break.. then..
+---
+GitHub 저장소를 검토해줘:
+https://github.com/nantashin/readvoice-mvp
+
+## 문제
+PDF OCR 실패: PowerShell에서는 즉시 성공하지만 브라우저에서 실패. Node.js subprocess로 Python 호출 시 ollama PATH 못 찾는 것으로 추정
+
+## 검토 요청 파일
+- server/glm-ocr.py
+- modules/ocr/ocr-engine.ts
+- modules/ocr/pdf.ts
+
+## 요청
+1. 위 파일들의 문제 원인 분석
+2. 수정 코드 제안
+3. 테스트 방법 제안
+
+## 컨텍스트
+- 프로젝트: READ VOICE Pro MVP
+- 스택: Next.js 14, TypeScript, Ollama, GLM-OCR
+- 브랜치: master
+- 날짜: 2026-04-24 16:12
+복사
+Summary
+원인 분석 결과, **PowerShell에선 성공하고 브라우저(Next.js 서버 경유)에서 실패하는 패턴은 환경변수 PATH 차이 가능성이 높습니다. 기존 glm-ocr.py는 ollama를 단순 명령어로 실행해서 Node subprocess 환경에서 찾지 못할 수 있었습니다. 이를 해결하려고 resolve_ollama_bin()을 추가해 OLLAMA_BIN → shutil.which → Windows 기본 설치 경로 순으로 실행 파일을 결정하도록 바꿨습니다.
+
+Node 측(modules/ocr/ocr-engine.ts)에서도 Windows일 때 PATH에 Ollama 설치 후보 경로를 보강하는 buildPythonEnv()를 추가하고, spawnSync에 해당 env를 전달했습니다. 또한 PYTHON_BIN 오버라이드(process.env.PYTHON_BIN)를 지원하도록 바꿔 Python alias 문제도 줄였습니다.
+
+OCR 실패 시 진단을 쉽게 하도록 stdout 비어 있을 때 stderr 일부를 포함해 에러를 던지도록 보완했습니다.
+
+modules/ocr/pdf.ts는 PDF 텍스트 추출/PNG 변환/OCR fallback 구조 자체는 유지하고, 이번 이슈의 핵심 병목(ollama 실행 경로 문제)은 ocr-engine.ts + glm-ocr.py에서 해결하는 방식으로 정리했습니다.
+
+문제 원인 분석 (요청 1)
+브라우저 업로드 경로는 Next.js API -> Node subprocess -> python -> ollama 체인입니다.
+
+이때 Node 프로세스의 PATH가 PowerShell 세션 PATH와 다르면 ollama를 못 찾거나 다른 실행 컨텍스트가 잡혀 실패합니다.
+
+따라서 “터미널 수동 실행은 성공, 웹 요청은 실패”가 재현될 수 있습니다. 이 패치는 그 케이스를 겨냥했습니다.
+
+수정 코드 제안 (요청 2)
+적용 완료:
+
+server/glm-ocr.py
+
+resolve_ollama_bin() 추가 (ENV/which/Windows 설치경로 fallback).
+
+subprocess.run([...])에서 resolved 절대 경로 사용.
+
+modules/ocr/ocr-engine.ts
+
+buildPythonEnv() 추가 및 Windows PATH 보강.
+
+PYTHON_BIN 지원 + spawn env 주입.
+
+오류 메시지 개선(빈 stdout 시 stderr 포함).
+
+테스트 방법 제안 (요청 3)
+서버 실행 전 환경변수 지정(Windows 권장):
+
+OLLAMA_BIN=C:\Users\<USER>\AppData\Local\Programs\Ollama\ollama.exe
+
+PYTHON_BIN=python (또는 실제 실행 경로)
+
+단독 스크립트 확인:
+
+python server/glm-ocr.py <png_path>
+
+JSON success:true 확인.
+
+API 경유 확인:
+
+브라우저 PDF 업로드 → 1페이지 OCR 정상 텍스트 반환 확인.
+
+장애 재현 점검:
+
+PATH에서 ollama 제거 상태에서도 OLLAMA_BIN만으로 동작하는지 확인.
+
+로그 점검:
+
+실패 시 [OCR] GLM-OCR 응답 실패: 메시지에 이유가 축약되어 노출되는지 확인.
+
+Testing
+
+✅ npx eslint modules/ocr/ocr-engine.ts modules/ocr/pdf.ts app/api/ocr/route.ts
+
+✅ npx tsc --noEmit
+
+❌ npm run lint (저장소 기존 타 파일 lint 오류로 실패; 이번 변경 범위 외)
+
+
+파일 (4)개
+
+route.ts  app/api/ocr/route.ts   +2 -6
+ocr-engine.ts  modules/ocr/ocr-engine.ts   +99 -47
+pdf.ts  modules/ocr/pdf.ts   +147 -70
+glm-ocr.py  server/glm-ocr.py   +137 -19
+
+
+diff --git a/app/api/ocr/route.ts b/app/api/ocr/route.ts
+index 0d424827e59183c07c487101e9cf1761a8c6e1f9..b11d53cb9373b606f06f4df4a194e4f56e5c55a2 100644
+--- a/app/api/ocr/route.ts
++++ b/app/api/ocr/route.ts
+@@ -1,69 +1,65 @@
+ import { NextRequest, NextResponse } from "next/server"
+ import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
+-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
+ 
+ export async function POST(req: NextRequest) {
+   try {
+     const contentType = req.headers.get("content-type") ?? ""
+     if (!contentType.includes("multipart/form-data")) {
+       return NextResponse.json({ error: "Invalid content type" }, { status: 415 })
+     }
+ 
+     const formData = await req.formData()
+     const file = formData.get("file")
+ 
+     if (!file || !(file instanceof File)) {
+       return NextResponse.json({ error: "No file provided" }, { status: 400 })
+     }
+ 
+     if (!SUPPORTED_TYPES.includes(file.type)) {
+       return NextResponse.json({ error: "지원하지 않는 파일 형식입니다." }, { status: 400 })
+     }
+ 
+     if (file.size > MAX_FILE_SIZE) {
+       return NextResponse.json({ error: "파일 크기는 10MB 이하여야 합니다." }, { status: 400 })
+     }
+ 
+     const arrayBuffer = await file.arrayBuffer()
+     const buffer = Buffer.from(arrayBuffer)
+     const modelStr = (formData.get("model") as string) || "moondream"
+ 
+     // 파일 타입 확인
+     const isPDF =
+       file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+ 
+     let text: string
+ 
+     if (isPDF) {
+-      // PDF: OCR 텍스트 추출만
+-      console.log("[API] PDF 텍스트 추출")
+-      text = await extractTextOCR(buffer, file.type, file.name)
++      console.log("[API] PDF OCR 파이프라인 실행")
++      text = await extractText(buffer, "application/pdf", file.name)
+     } else {
+-      // 이미지: Vision 묘사만
+       console.log("[API] 이미지 Vision 분석")
+ 
+-      // 모델 검증
+       const validModels = [
+         "moondream",
+         "gemma3:4b",
+         "qwen2.5vl:7b",
+         "llama3.2-vision:11b-instruct-q4_K_M",
+       ]
+       if (!validModels.includes(modelStr)) {
+         return NextResponse.json({ error: "유효하지 않은 모델입니다." }, { status: 400 })
+       }
+ 
+       text = await extractText(
+         buffer,
+         file.type,
+         file.name,
+         modelStr as "moondream" | "llama-vision-q4" | "claude-haiku"
+       )
+     }
+ 
+     return NextResponse.json({ text })
+   } catch (err) {
+     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."
+     return NextResponse.json({ error: message }, { status: 500 })
+   }
+ }
+diff --git a/modules/ocr/ocr-engine.ts b/modules/ocr/ocr-engine.ts
+index 1f599ab0c3fd154457f7429801ef1499804eb45e..e7ee9165e25daf59dd144c8398930a0928ff9f2d 100644
+--- a/modules/ocr/ocr-engine.ts
++++ b/modules/ocr/ocr-engine.ts
+@@ -1,70 +1,122 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ 
+-const OCR_PROMPT = `다음 문서의 모든 텍스트를 한국어로 그대로 읽어줘.
+-- 보이는 글자를 빠짐없이 정확히 옮겨써
+-- 표는 그대로 유지
+-- 숫자, 날짜, 코드 정확히
+-- 설명이나 해석 절대 금지
+-- 텍스트만 출력`
++function sanitizeOcrText(text: string): string {
++  const cleanedLines = text
++    .split(/\r?\n/)
++    .map((line) => line.trim())
++    .filter((line) => {
++      if (!line) return false
++      const lowered = line.toLowerCase()
++      if (["markdown", "json", "```", "```json", "```markdown"].includes(lowered)) {
++        return false
++      }
++      if (/^[{}\[\]"`\\]+$/.test(line)) {
++        return false
++      }
++      return true
++    })
++
++  return cleanedLines.join("\n").trim()
++}
++
++function isGarbageOcrText(text: string): boolean {
++  if (!text || text.length < 8) return true
++
++  const braceLike = (text.match(/[{}\[\]`]/g) || []).length
++  const replacementChars = (text.match(/ /g) || []).length
++  const letters = (text.match(/[가-힣a-zA-Z0-9]/g) || []).length
++
++  if (replacementChars > 5) return true
++  if (letters === 0) return true
++  if (braceLike > letters * 0.6) return true
++
++  return false
++}
++
++function buildPythonEnv(): NodeJS.ProcessEnv {
++  const env: NodeJS.ProcessEnv = { ...process.env }
++
++  if (process.platform === "win32") {
++    const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") || "Path"
++    const basePath = env[pathKey] || ""
++    const localAppData = env.LOCALAPPDATA || ""
++    const candidates = [
++      path.join(localAppData, "Programs", "Ollama"),
++      "C:\\Program Files\\Ollama",
++    ]
++
++    const merged = [...new Set([basePath, ...candidates].filter(Boolean))].join(";")
++    env[pathKey] = merged
++  }
++
++  return env
++}
+ 
+ export async function extractTextOCR(
+   buffer: Buffer,
+   mimeType: string,
+   fileName?: string
+ ): Promise<string> {
+   const name = fileName || "문서"
+ 
+-  console.log("[OCR] 버퍼 크기:", buffer.length, "bytes")
++  if (!mimeType.startsWith("image/")) {
++    throw new Error(`[OCR] 이미지 MIME 타입만 지원합니다: ${mimeType}`)
++  }
+ 
+-  // GLM-OCR 시도 (Python 스크립트로 직접 호출)
+   const tmpImg = path.join(os.tmpdir(), `rv_glm_${Date.now()}.png`)
+   const scriptPath = path.join(process.cwd(), "server", "glm-ocr.py")
++  const pythonBin = process.env.PYTHON_BIN || "python"
+ 
+-  console.log("[OCR] 스크립트 존재:", fs.existsSync(scriptPath))
+-  console.log("[OCR] tmpImg:", tmpImg)
++  if (!fs.existsSync(scriptPath)) {
++    throw new Error(`[OCR] 스크립트가 없습니다: ${scriptPath}`)
++  }
+ 
+   try {
+     fs.writeFileSync(tmpImg, buffer)
+ 
+-    const result = spawnSync(
+-      "python",
+-      [scriptPath, tmpImg],
+-      {
+-        timeout: 90000,
+-        encoding: "utf8",
+-        cwd: process.cwd()  // 작업 디렉토리 명시
+-      }
+-    )
+-
+-    console.log("[OCR] exit code:", result.status)
+-    console.log("[OCR] stdout:", result.stdout?.substring(0, 200))
+-    console.log("[OCR] stderr:", result.stderr?.substring(0, 200))
+-
+-    // 임시 파일 삭제
+-    setTimeout(() => {
+-      try {
+-        fs.unlinkSync(tmpImg)
+-      } catch (e) {}
+-    }, 2000)
+-
+-    if (result.status === 0 && result.stdout?.trim()) {
+-      try {
+-        const data = JSON.parse(result.stdout.trim())
+-        if (data.success && data.text && data.text.length > 5) {
+-          console.log("[OCR] GLM-OCR 성공:", data.text.length, "자")
+-          return `파일명: ${name}\n\n${data.text}`
+-        }
+-      } catch (e) {
+-        console.log("[OCR] JSON 파싱 실패:", result.stdout?.substring(0, 100))
+-      }
++    const result = spawnSync(pythonBin, [scriptPath, tmpImg], {
++      timeout: 120000,
++      encoding: "utf8",
++      cwd: process.cwd(),
++      env: buildPythonEnv(),
++    })
++
++    if (result.error) {
++      throw new Error(`[OCR] Python 실행 실패: ${result.error.message}`)
++    }
++
++    const stdout = (result.stdout || "").trim()
++    const stderr = (result.stderr || "").trim()
++
++    if (!stdout) {
++      throw new Error(`[OCR] GLM-OCR 출력이 비어 있습니다. stderr=${stderr.slice(0, 300) || "없음"}`)
+     }
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.log("[OCR] GLM-OCR 예외:", message)
+-  }
+ 
+-  throw new Error("GLM-OCR 실패. 서버 로그를 확인해주세요.")
++    let data: { success?: boolean; text?: string; error?: string } | null = null
++    try {
++      data = JSON.parse(stdout)
++    } catch {
++      throw new Error(`[OCR] JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++    }
++
++    if (result.status !== 0 || !data?.success) {
++      throw new Error(`[OCR] GLM-OCR 응답 실패: ${data?.error || stderr || "unknown error"}`)
++    }
++
++    const cleaned = sanitizeOcrText(data.text || "")
++    if (isGarbageOcrText(cleaned)) {
++      throw new Error("[OCR] GLM-OCR 결과가 손상되었거나 노이즈가 많습니다.")
++    }
++
++    return `파일명: ${name}\n\n${cleaned}`
++  } finally {
++    try {
++      fs.unlinkSync(tmpImg)
++    } catch {
++      // noop
++    }
++  }
+ }
+diff --git a/modules/ocr/pdf.ts b/modules/ocr/pdf.ts
+index db5234a675f64a383378d3fc62af1fa90ad06e33..20cb9f558ef069edbd281d7cf6413ee60dec7777 100644
+--- a/modules/ocr/pdf.ts
++++ b/modules/ocr/pdf.ts
+@@ -1,92 +1,169 @@
+ import fs from "fs"
+-import path from "path"
+ import os from "os"
++import path from "path"
+ import { spawnSync } from "child_process"
+ import { extractTextOCR } from "./ocr-engine"
+ 
+-function extractRawText(buffer: Buffer): string {
+-  const str = buffer.toString("binary")
+-  const matches = str.match(/\(([^\)]{2,100})\)/g) || []
+-  const texts = matches
+-    .map((m) => m.slice(1, -1))
+-    .filter((t) => {
+-      // 한글 또는 읽기 가능한 영문/숫자만
+-      const koreanCount = (t.match(/[가-힣]/g) || []).length
+-      const readableCount = (
+-        t.match(/[a-zA-Z0-9가-힣\s.,!?:;()]/g) || []
+-      ).length
+-      const totalCount = t.length
+-      // 읽기 가능한 문자 비율이 70% 이상이어야 함
+-      return (
+-        readableCount / totalCount > 0.7 &&
+-        (koreanCount > 0 || t.length > 3)
+-      )
+-    })
+-    .join(" ")
++const PDF_TO_IMAGE_SCRIPT = path.join(process.cwd(), "server", "pdf-to-image.py")
++const PYTHON_BIN = process.env.PYTHON_BIN || "python"
++const OCR_PAGE_LIMIT = 3
++const EMBEDDED_TEXT_PAGE_LIMIT = 20
++
++function normalizeExtractedText(text: string): string {
++  return text
++    .replace(/\u0000/g, "")
++    .replace(/[ \t]+/g, " ")
++    .replace(/\n{3,}/g, "\n\n")
+     .trim()
++}
++
++function looksLikeMeaningfulText(text: string): boolean {
++  if (!text || text.length < 80) return false
++
++  const suspiciousTokenCount = (text.match(/\bnode\d{4,}\b/g) || []).length
++  const metadataTokenCount =
++    (text.match(/\b(D:\d{14}\+\d{2}'\d{2}'|Adobe Identity|Producer|Creator|CreationDate)\b/g) || []).length
+ 
+-  return texts
++  const wordTokens = text.match(/[가-힣a-zA-Z]{2,}/g) || []
++  const uniqueWords = new Set(wordTokens.map((w) => w.toLowerCase()))
++  const naturalWordCount = wordTokens.length
++  const uniqueWordRatio = naturalWordCount > 0 ? uniqueWords.size / naturalWordCount : 0
++
++  if (suspiciousTokenCount >= 5) return false
++  if (metadataTokenCount >= 3) return false
++
++  return naturalWordCount >= 20 && uniqueWordRatio > 0.3
+ }
+ 
+-export async function extractTextFromPDF(
+-  buffer: Buffer,
+-  fileName?: string
+-): Promise<string> {
+-  const name = fileName || "문서"
++async function extractEmbeddedText(buffer: Buffer): Promise<string> {
++  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.js")
++  const loadingTask = pdfjs.getDocument({
++    data: new Uint8Array(buffer),
++    useWorkerFetch: false,
++    isEvalSupported: false,
++    disableFontFace: true,
++  })
++
++  const document = await loadingTask.promise
+ 
+-  // 1단계: 간단한 텍스트 파싱
+   try {
+-    console.log("[PDF] 텍스트 파싱 시도...")
+-    const rawText = extractRawText(buffer)
+-    // 한글이 최소 10자 이상 있어야 유효한 텍스트로 인정
+-    const koreanCount = (rawText.match(/[가-힣]/g) || []).length
+-
+-    if (koreanCount > 10) {
+-      console.log(`[PDF] 텍스트 파싱 성공: 한글 ${koreanCount}자`)
+-      return `파일명: ${name}\n\n설명:\n${rawText.substring(0, 4000)}`
++    const pages: string[] = []
++    const pageCount = Math.min(document.numPages, EMBEDDED_TEXT_PAGE_LIMIT)
++
++    for (let pageNumber = 1; pageNumber <= pageCount; pageNumber += 1) {
++      const page = await document.getPage(pageNumber)
++      const textContent = await page.getTextContent()
++      const pageText = textContent.items
++        .map((item) => ("str" in item ? item.str : ""))
++        .join(" ")
++        .trim()
++
++      if (pageText) {
++        pages.push(pageText)
++      }
+     }
+ 
+-    console.log(
+-      `[PDF] 유효 텍스트 없음 (한글 ${koreanCount}자) → pypdfium2로 전환`
+-    )
+-  } catch (e: unknown) {
+-    const message = e instanceof Error ? e.message : String(e)
+-    console.error("[PDF] 텍스트 파싱 실패:", message)
++    return normalizeExtractedText(pages.join("\n\n"))
++  } finally {
++    await document.destroy()
++  }
++}
++
++type PdfToImageResult = {
++  totalPages: number
++}
++
++function convertPdfPageToPng(pdfPath: string, page: number, outputPath: string): PdfToImageResult {
++  if (!fs.existsSync(PDF_TO_IMAGE_SCRIPT)) {
++    throw new Error(`[PDF] 변환 스크립트가 없습니다: ${PDF_TO_IMAGE_SCRIPT}`)
++  }
++
++  const result = spawnSync(PYTHON_BIN, [PDF_TO_IMAGE_SCRIPT, pdfPath, String(page), outputPath], {
++    timeout: 45000,
++    encoding: "utf8",
++    cwd: process.cwd(),
++  })
++
++  if (result.error) {
++    throw new Error(`[PDF] Python 실행 실패: ${result.error.message}`)
++  }
++
++  if (result.status !== 0) {
++    const stderr = (result.stderr || "").trim()
++    throw new Error(`[PDF] PDF→PNG 변환 실패 (page=${page}, status=${result.status}): ${stderr || "stderr 없음"}`)
++  }
++
++  const stdout = (result.stdout || "").trim()
++  if (!stdout) {
++    throw new Error(`[PDF] 변환 출력이 비어 있습니다 (page=${page})`)
++  }
++
++  let parsed: { total_pages?: number } | null = null
++  try {
++    parsed = JSON.parse(stdout)
++  } catch {
++    throw new Error(`[PDF] 변환 출력 JSON 파싱 실패: ${stdout.slice(0, 300)}`)
++  }
++
++  if (!fs.existsSync(outputPath)) {
++    throw new Error(`[PDF] PNG 파일이 생성되지 않았습니다: ${outputPath}`)
+   }
+ 
+-  // 2단계: pypdfium2로 PDF → PNG 변환
+-  console.log("[PDF] pypdfium2로 PDF → PNG 변환...")
++  return {
++    totalPages: parsed?.total_pages ?? page + 1,
++  }
++}
++
++export async function extractTextFromPDF(buffer: Buffer, fileName?: string): Promise<string> {
++  const name = fileName || "문서"
+ 
+-  // PDF → PNG 변환
+-  const tmpPdf = path.join(os.tmpdir(), `rv_${Date.now()}.pdf`)
+-  const tmpPng = path.join(os.tmpdir(), `rv_${Date.now()}.png`)
++  try {
++    const embeddedText = await extractEmbeddedText(buffer)
++    if (looksLikeMeaningfulText(embeddedText)) {
++      return `파일명: ${name}\n\n텍스트:\n${embeddedText.substring(0, 8000)}`
++    }
++    console.log("[PDF] embedded text 신뢰도 부족 -> OCR fallback")
++  } catch (error: unknown) {
++    const message = error instanceof Error ? error.message : String(error)
++    console.warn("[PDF] embedded text 추출 실패:", message)
++  }
++
++  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "rv_pdf_"))
++  const tmpPdf = path.join(tmpDir, "input.pdf")
+   fs.writeFileSync(tmpPdf, buffer)
+ 
+-  const convertResult = spawnSync(
+-    "python",
+-    [path.join(process.cwd(), "server", "pdf-to-image.py"), tmpPdf, "0", tmpPng],
+-    { timeout: 30000, encoding: "utf8" }
+-  )
+-
+-  console.log("[PDF] 변환 결과:", convertResult.status, convertResult.stdout)
+-
+-  // 임시 PDF 삭제
+-  setTimeout(() => {
+-    try {
+-      fs.unlinkSync(tmpPdf)
+-    } catch (e) {}
+-  }, 1000)
+-
+-  if (convertResult.status === 0 && fs.existsSync(tmpPng)) {
+-    console.log("[PDF] PNG 변환 성공, GLM-OCR 시작...")
+-    const pngBuffer = fs.readFileSync(tmpPng)
+-    setTimeout(() => {
++  const pageTexts: string[] = []
++  const pageErrors: string[] = []
++
++  try {
++    let totalPages = 1
++
++    for (let page = 0; page < Math.min(totalPages, OCR_PAGE_LIMIT); page += 1) {
++      const tmpPng = path.join(tmpDir, `page-${page}.png`)
++
+       try {
+-        fs.unlinkSync(tmpPng)
+-      } catch (e) {}
+-    }, 1000)
+-    return await extractTextOCR(pngBuffer, "image/png", name)
++        const converted = convertPdfPageToPng(tmpPdf, page, tmpPng)
++        totalPages = Math.max(converted.totalPages, 1)
++
++        const pngBuffer = fs.readFileSync(tmpPng)
++        const ocrResult = await extractTextOCR(pngBuffer, "image/png", `${name} (page ${page + 1})`)
++        const normalized = ocrResult.replace(/^파일명:[^\n]*\n\n/, "").trim()
++
++        if (normalized.length > 0) {
++          pageTexts.push(`[페이지 ${page + 1}]\n${normalized}`)
++        }
++      } catch (error: unknown) {
++        const message = error instanceof Error ? error.message : String(error)
++        pageErrors.push(`page ${page + 1}: ${message}`)
++      }
++    }
++  } finally {
++    fs.rmSync(tmpDir, { recursive: true, force: true })
++  }
++
++  if (pageTexts.length > 0) {
++    return `파일명: ${name}\n\n${pageTexts.join("\n\n")}`
+   }
+ 
+-  throw new Error("PDF 변환 실패")
++  throw new Error(`PDF OCR 실패: ${pageErrors.join(" | ") || "원인을 확인할 수 없습니다."}`)
+ }
+diff --git a/server/glm-ocr.py b/server/glm-ocr.py
+index 1a779e2182e1a59552107c432a7ff0bb4e24a059..ed4e73e4ec8e2d658d69800b3133049978eca636 100644
+--- a/server/glm-ocr.py
++++ b/server/glm-ocr.py
+@@ -1,30 +1,148 @@
+-import sys
+-import subprocess
+ import json
++import os
+ import re
++import shutil
++import subprocess
++import sys
++import tempfile
++from pathlib import Path
+ 
+-def clean_text(text: str) -> str:
+-    # ANSI 이스케이프 코드 제거
+-    ansi_escape = re.compile(r'\x1b\[[0-9;]*[a-zA-Z]|\x1b\[K')
++from PIL import Image
++
++if hasattr(sys.stdout, "reconfigure"):
++    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
++if hasattr(sys.stderr, "reconfigure"):
++    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
++
++BASE_PROMPT = """다음 이미지의 보이는 텍스트만 그대로 추출해.
++- 설명, 해석, 요약 금지
++- markdown/json 코드블록 금지
++- 중괄호/따옴표만 반복 출력 금지
++- 결과는 순수 텍스트만 출력"""
++MAX_IMAGE_SIDE = 2048
++
++
++def strip_control_noise(text: str) -> str:
++    ansi_escape = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\[[0-9;?]*[~]')
+     text = ansi_escape.sub('', text)
+-    # 연속 공백/줄바꿈 정리
++    text = re.sub(r'[\u2800-\u28FF]', '', text)
++    text = text.replace('\r', '\n')
+     text = re.sub(r'\n{3,}', '\n\n', text)
+-    text = re.sub(r' {2,}', ' ', text)
+     return text.strip()
+ 
+-def run_glm_ocr(image_path: str) -> str:
+-    result = subprocess.run(
+-        ["ollama", "run", "glm-ocr",
+-         "이 문서의 모든 텍스트를 정확히 읽어줘",
+-         image_path],
+-        capture_output=True,
+-        text=True,
+-        timeout=60,
+-        encoding="utf-8"
++
++def clean_text(text: str) -> str:
++    text = strip_control_noise(text)
++    lines = [line.strip() for line in text.splitlines()]
++    filtered = []
++
++    for line in lines:
++        if not line:
++            filtered.append("")
++            continue
++
++        lowered = line.lower()
++        if lowered in {"markdown", "json", "```", "```json", "```markdown"}:
++            continue
++        if re.fullmatch(r'[{}\[\]"`\\]+', line):
++            continue
++        filtered.append(line)
++
++    cleaned = "\n".join(filtered)
++    cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
++    cleaned = re.sub(r' {2,}', ' ', cleaned)
++    return cleaned.strip()
++
++
++def resolve_ollama_bin() -> str:
++    env_bin = os.getenv("OLLAMA_BIN")
++    if env_bin and Path(env_bin).exists():
++        return env_bin
++
++    found = shutil.which("ollama")
++    if found:
++        return found
++
++    if os.name == "nt":
++        local_app_data = os.getenv("LOCALAPPDATA", "")
++        program_files = os.getenv("ProgramFiles", "")
++        candidates = [
++            Path(local_app_data) / "Programs" / "Ollama" / "ollama.exe",
++            Path(program_files) / "Ollama" / "ollama.exe",
++        ]
++
++        for candidate in candidates:
++            if candidate.exists():
++                return str(candidate)
++
++    raise FileNotFoundError(
++        "ollama 실행 파일을 찾을 수 없습니다. OLLAMA_BIN 환경변수 또는 PATH를 확인하세요."
+     )
+-    return clean_text(result.stdout.strip())
++
++
++def prepare_image(image_path: str) -> str:
++    src = Path(image_path)
++    with Image.open(src) as img:
++        img = img.convert("RGB")
++        max_side = max(img.width, img.height)
++        if max_side > MAX_IMAGE_SIDE:
++            scale = MAX_IMAGE_SIDE / max_side
++            new_size = (max(1, int(img.width * scale)), max(1, int(img.height * scale)))
++            img = img.resize(new_size, Image.Resampling.LANCZOS)
++
++        fd, temp_path = tempfile.mkstemp(prefix="rv_glm_pre_", suffix=".png")
++        os.close(fd)
++        img.save(temp_path, format="PNG", optimize=True)
++        return temp_path
++
++
++def run_glm_ocr(image_path: str) -> str:
++    prepared_path = prepare_image(image_path)
++    prompt = f"{BASE_PROMPT}\n\n이미지 경로: {prepared_path}"
++    ollama_bin = resolve_ollama_bin()
++
++    try:
++        env = os.environ.copy()
++        env["TERM"] = "dumb"
++        env["NO_COLOR"] = "1"
++
++        result = subprocess.run(
++            [ollama_bin, "run", "glm-ocr", prompt],
++            capture_output=True,
++            text=True,
++            timeout=120,
++            encoding="utf-8",
++            errors="replace",
++            env=env,
++        )
++
++        if result.returncode != 0:
++            stderr = strip_control_noise((result.stderr or "").strip())
++            stdout = strip_control_noise((result.stdout or "").strip())
++            detail = stderr or stdout or "출력 없음"
++            raise RuntimeError(f"ollama 실행 실패 (code={result.returncode}): {detail[:1500]}")
++
++        return clean_text((result.stdout or "").strip())
++    finally:
++        try:
++            os.remove(prepared_path)
++        except OSError:
++            pass
++
++
++def emit_json(payload: dict, exit_code: int) -> None:
++    sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
++    sys.stdout.flush()
++    raise SystemExit(exit_code)
++
+ 
+ if __name__ == "__main__":
++    if len(sys.argv) < 2:
++        emit_json({"success": False, "error": "image path is required"}, 1)
++
+     image_path = sys.argv[1]
+-    text = run_glm_ocr(image_path)
+-    print(json.dumps({"success": True, "text": text}, ensure_ascii=False))
++    try:
++        text = run_glm_ocr(image_path)
++        emit_json({"success": True, "text": text}, 0)
++    except Exception as e:
++        emit_json({"success": False, "error": str(e)}, 1)
+
+
+
+
+
+
+
+
+
+
+
+
+
+

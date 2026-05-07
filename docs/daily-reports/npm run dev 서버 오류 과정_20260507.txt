@@ -1,0 +1,280 @@
+PowerShell 7.6.1
+PS C:\Windows\System32> npm run dev
+npm error code ENOENT
+npm error syscall open
+npm error path C:\Windows\System32\package.json
+npm error errno -4058
+npm error enoent Could not read package.json: Error: ENOENT: no such file or directory, open 'C:\Windows\System32\package.json'
+npm error enoent This is related to npm not being able to find a file.
+npm error enoent
+npm error A complete log of this run can be found in: C:\Users\tara0\AppData\Local\npm-cache\_logs\2026-04-30T12_14_26_795Z-debug-0.log
+PS C:\Windows\System32> cd C:\Users\tara0\readvoice-mvp
+PS C:\Users\tara0\readvoice-mvp> npm run dev
+
+> readvoice-mvp@0.1.0 dev
+> next dev
+
+▲ Next.js 16.2.4 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://192.168.50.125:3000
+- Environments: .env.local
+✓ Ready in 1341ms
+
+ GET / 200 in 379ms (next.js: 223ms, application-code: 156ms)
+ GET / 200 in 48ms (next.js: 5ms, application-code: 43ms)
+ GET /api/watch-folder 200 in 78ms (next.js: 64ms, application-code: 14ms)
+[API] 파일 수신: Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg image/jpeg 667402
+[API] 받은 모델: qwen3.5
+[API] validModels: [
+  'gemma4:e2b',
+  'gemma4:e4b',
+  'llama3.2-vision:11b-instruct-q4_K_M',
+  'qwen3.5:9b',
+  'richardyoung/olmocr2:7b-q8',
+  'glm-ocr'
+]
+[API] 유효한 모델 여부: false
+[API] 유효하지 않은 모델: qwen3.5 유효한 모델: [
+  'gemma4:e2b',
+  'gemma4:e4b',
+  'llama3.2-vision:11b-instruct-q4_K_M',
+  'qwen3.5:9b',
+  'richardyoung/olmocr2:7b-q8',
+  'glm-ocr'
+]
+ POST /api/ocr 400 in 114ms (next.js: 75ms, application-code: 40ms)
+[API] 파일 수신: 인물관계도.png image/jpeg 390693
+[API] 받은 모델: qwen3.5:9b
+[API] validModels: [
+  'gemma4:e2b',
+  'gemma4:e4b',
+  'llama3.2-vision:11b-instruct-q4_K_M',
+  'qwen3.5:9b',
+  'richardyoung/olmocr2:7b-q8',
+  'glm-ocr'
+]
+[API] 유효한 모델 여부: true
+[API] 이미지 Vision 분석 (모델: qwen3.5:9b )
+[Vision] 모델: qwen3.5:9b, 한국어직접: true, 라마: false, E4B: false
+ POST /api/ocr 500 in 3.0min (next.js: 1884µs, application-code: 3.0min)
+ GET / 200 in 88ms (next.js: 51ms, application-code: 37ms)
+✓ Compiled in 79ms
+ GET / 200 in 110ms (next.js: 71ms, application-code: 39ms)
+ HEAD / 200 in 80ms (next.js: 2ms, application-code: 77ms)
+ GET / 200 in 54ms (next.js: 5ms, application-code: 50ms)
+ GET /api/watch-folder 200 in 41ms (next.js: 27ms, application-code: 14ms)
+ GET / 200 in 27ms (next.js: 3ms, application-code: 24ms)
+✓ Compiled in 42ms
+ GET / 200 in 104ms (next.js: 73ms, application-code: 31ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1096:12)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+⨯ ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app\components\FileUpload.tsx:122:7)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => { {
+  digest: '2602660764'
+}
+✓ Compiled in 89ms
+ GET / 500 in 212ms (next.js: 76ms, application-code: 136ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Set.forEach (<anonymous>)
+    at Home (app/page.tsx:1085:20)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1099:11)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⨯ ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app\components\FileUpload.tsx:122:7)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => { {
+  digest: '2602660764'
+}
+ GET / 500 in 173ms (next.js: 67ms, application-code: 106ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1099:11)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+⨯ ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app\components\FileUpload.tsx:122:7)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => { {
+  digest: '1692623505'
+}
+✓ Compiled in 53ms
+ GET / 500 in 199ms (next.js: 76ms, application-code: 124ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1099:11)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 58ms
+⨯ ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app\components\FileUpload.tsx:122:7)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => { {
+  digest: '1692623505'
+}
+ GET / 500 in 191ms (next.js: 73ms, application-code: 117ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1099:11)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⨯ ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app\components\FileUpload.tsx:122:7)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => { {
+  digest: '1524972893'
+}
+✓ Compiled in 49ms
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+ GET / 500 in 202ms (next.js: 88ms, application-code: 114ms)
+[browser] Uncaught ReferenceError: Cannot access 'processFile' before initialization
+    at FileUpload (app/components/FileUpload.tsx:122:7)
+    at Home (app/page.tsx:1099:11)
+  120 |     window.addEventListener("startAnalysis", handleStartAnalysis as EventListe...
+  121 |     return () => window.removeEventListener("startAnalysis", handleStartAnalys...
+> 122 |   }, [processFile])
+      |       ^
+  123 |
+  124 |   // openFileInput 이벤트 수신 (음성 명령으로 파일 선택 창 열기)
+  125 |   useEffect(() => {
+⚠ Fast Refresh had to perform a full reload due to a runtime error.
+✓ Compiled in 50ms
+ GET / 200 in 148ms (next.js: 66ms, application-code: 82ms)
+ GET /api/watch-folder 200 in 43ms (next.js: 29ms, application-code: 14ms)
+✓ Compiled in 44ms
+ GET / 200 in 91ms (next.js: 66ms, application-code: 25ms)
+ GET / 200 in 61ms (next.js: 2ms, application-code: 59ms)
+ GET /api/watch-folder 200 in 40ms (next.js: 31ms, application-code: 9ms)
+✓ Compiled in 62ms
+ GET / 200 in 101ms (next.js: 70ms, application-code: 31ms)
+✓ Compiled in 50ms
+ GET / 200 in 94ms (next.js: 65ms, application-code: 29ms)
+✓ Compiled in 57ms
+ GET / 200 in 95ms (next.js: 66ms, application-code: 29ms)
+✓ Compiled in 51ms
+ GET / 200 in 109ms (next.js: 75ms, application-code: 34ms)
+✓ Compiled in 52ms
+ GET / 200 in 105ms (next.js: 64ms, application-code: 41ms)
+✓ Compiled in 47ms
+ GET / 200 in 93ms (next.js: 61ms, application-code: 33ms)
+ GET / 200 in 88ms (next.js: 4ms, application-code: 84ms)
+ GET /api/watch-folder 200 in 48ms (next.js: 32ms, application-code: 16ms)
+[API] 파일 수신: Mona_Lisa,_by_Leonardo_da_Vinci,_from_C2RMF_retouched.jpg image/jpeg 667402
+[API] 모델 ID 변환 후: gemma4
+[API] 받은 모델: gemma4
+[API] validModels: [
+  'gemma4:e2b',
+  'gemma4:e4b',
+  'llama3.2-vision:11b-instruct-q4_K_M',
+  'qwen3.5:9b',
+  'richardyoung/olmocr2:7b-q8',
+  'glm-ocr'
+]
+[API] 유효한 모델 여부: false
+[API] 유효하지 않은 모델: gemma4 유효한 모델: [
+  'gemma4:e2b',
+  'gemma4:e4b',
+  'llama3.2-vision:11b-instruct-q4_K_M',
+  'qwen3.5:9b',
+  'richardyoung/olmocr2:7b-q8',
+  'glm-ocr'
+]
+ POST /api/ocr 400 in 61ms (next.js: 39ms, application-code: 23ms)
+[browser] [Analyzer] API 에러: 유효하지 않은 모델입니다.
+    at analyzeFile (lib/vision/analyzer.ts:70:15)
+    at async FileUpload.useCallback[processFile] (app/components/FileUpload.tsx:109:22)
+  68 |
+  69 |     if (!res.ok) {
+> 70 |       console.error("[Analyzer] API 에러:", data.error)
+     |               ^
+  71 |       return {
+  72 |         text: "",
+  73 |         error: data.error ?? "파일 처리 중 오류가 발생했습니다.", (lib/vision/analyzer.ts:70:15)
+[browser] [processFile] 에러: 유효하지 않은 모델입니다.
+    at FileUpload.useCallback[processFile] (app/components/FileUpload.tsx:113:17)
+  111 |
+  112 |       if (result.error) {
+> 113 |         console.error("[processFile] 에러:", result.error)
+      |                 ^
+  114 |         setError(result.error)
+  115 |         onResult(`오류: ${result.error}`)
+  116 |         onStatusChange("speaking") (app/components/FileUpload.tsx:113:17)
+✓ Compiled in 53ms
+ GET / 200 in 116ms (next.js: 75ms, application-code: 41ms)
+✓ Compiled in 45ms
+ GET / 200 in 102ms (next.js: 69ms, application-code: 32ms)
+✓ Compiled in 61ms
+ GET / 200 in 108ms (next.js: 75ms, application-code: 33ms)
+ GET / 200 in 67ms (next.js: 3ms, application-code: 64ms)
+ GET /api/watch-folder 200 in 48ms (next.js: 33ms, application-code: 15ms)
+ GET / 200 in 113ms (next.js: 47ms, application-code: 66ms)
+ GET /api/watch-folder 200 in 23ms (next.js: 9ms, application-code: 14ms)
+✓ Compiled in 1250ms
