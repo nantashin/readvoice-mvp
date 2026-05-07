@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
 import { extractText, SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
-import { extractTextOCR } from "@/modules/ocr/ocr-engine"
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,14 +34,11 @@ export async function POST(req: NextRequest) {
     let text: string
 
     if (isPDF) {
-      // PDF: OCR 텍스트 추출만
-      console.log("[API] PDF 텍스트 추출")
-      text = await extractTextOCR(buffer, file.type, file.name)
+      console.log("[API] PDF OCR 파이프라인 실행")
+      text = await extractText(buffer, "application/pdf", file.name)
     } else {
-      // 이미지: Vision 묘사만
       console.log("[API] 이미지 Vision 분석")
 
-      // 모델 검증
       const validModels = [
         "moondream",
         "gemma3:4b",
