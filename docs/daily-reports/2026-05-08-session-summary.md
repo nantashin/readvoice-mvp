@@ -1,11 +1,14 @@
 # 세션 요약 — 2026-05-08
 
 ## 작업 시간
-- **생성 시각:** 2026-05-08 17:33:35
+- **생성 시각:** 2026-05-08 17:50:38
 - **현재 버전:** v2.8.2
 - **브랜치:** master
 
 ## 오늘의 커밋 ()
+  - 5789f6e: docs: 전략문서 상세/간결 두 버전 유지
+  - 59fe6fb: docs: 서비스 전략 재검토 문서 추가
+  - 5f5655f: docs: 일일 보고서 자동 생성 (2026-05-08)
   - e014556: docs: 서비스 전략 재검토 문서 추가
   - c219cd6: feat: 키워드 우선 처리 및 마이크 자동 종료
   - d1fcdfa: feat: 접근성 개선 및 자연어 명령 확장
@@ -21,6 +24,8 @@
   - docs/daily-reports/2026-05-08.md
   - docs/daily-reports/roadmap_20260508.pptx
   - docs/roadmap-data.json
+  - docs/strategy/service-strategy-review-20260508-detailed.md
+  - docs/strategy/service-strategy-review-20260508.md
   - docs/versions/VERSION_HISTORY.md
   - docs/versions/v2.8.2/CLAUDE.md
   - docs/versions/v2.8.2/app_api_ocr_route.ts
