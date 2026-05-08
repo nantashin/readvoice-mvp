@@ -313,561 +313,123 @@ export default function Home() {
     }
   }, [stt.isListening, stt.transcript])
 
+  // 파일 분석 실행 헬퍼 함수
+  const executeAnalysis = useCallback((file: File, modelId: string) => {
+    console.log("[executeAnalysis] 파일:", file.name, "모델:", modelId)
+    window.dispatchEvent(new CustomEvent("startAnalysis", { detail: { file, model: modelId } }))
+    setPendingFile(null)
+    setMicState("processing")
+  }, [])
+
   const handleVoiceResult = async (transcript: string) => {
-    const currentMenu = menuStateRef.current
-    console.log("[처리] 현재 메뉴:", currentMenu, "입력:", transcript)
+    const t = transcript.replace(/\s/g, "").toLowerCase()
+    console.log("[음성] 입력:", transcript)
 
-    const t = transcript.toLowerCase()
+    // ── 즉시 처리 키워드 (LLM 불필요) ──────────────
 
-    // === 자연어 명령어 체크 (최우선 처리) ===
-
-    // 중지/취소
-    if (VOICE_COMMANDS.stop.test(t)) {
-      window.speechSynthesis.cancel()
-      bgmManager.pause()
-      stt.stopListening()
-      setMicState("off")
-      speak("멈췄어요.")
-      setTimeout(() => setMicState("off"), 1500)
+    // 속도
+    if (/천천히|느리게|빠르잖아|못알아|빠르다|빨라/.test(t)) {
+      const nr = Math.max(0.5, speechRate - 0.5)
+      setSpeechRate(nr); saveSpeechRate(nr)
+      speak(`${nr}배속이에요.`, nr)
+      return
+    }
+    if (/빠르게|빨리|너무느려|쫌빨|좀빨/.test(t)) {
+      const nr = Math.min(10.0, speechRate + 0.5)
+      setSpeechRate(nr); saveSpeechRate(nr)
+      speak(`${nr}배속이에요.`, nr)
       return
     }
 
-    // 다시/반복
-    if (VOICE_COMMANDS.repeat.test(t)) {
-      if (lastResponse) {
-        setMicState("speaking")
-        speak(lastResponse)
-        const delay = (lastResponse.length / 10) * 1000 / speechRate + 1000
-        setTimeout(() => setMicState("off"), delay)
-      } else {
-        speak("다시 읽어드릴 내용이 없어요.")
-        setTimeout(() => setMicState("off"), 1500)
-      }
-      return
-    }
-
-    // 처음으로
-    if (VOICE_COMMANDS.home.test(t)) {
-      window.speechSynthesis.cancel()
-      bgmManager.pause()
-      stt.stopListening()
-      setMenuState("idle")
-      setMicState("speaking")
-      speak(MAIN_MENU_TTS)
-      const delay = (MAIN_MENU_TTS.length / 10) * 1000 / speechRate + 1000
-      setTimeout(() => setMicState("off"), delay)
-      return
-    }
-
-    // 이전으로
-    if (VOICE_COMMANDS.back.test(t)) {
-      setMenuState(previousMenuState)
-      setMicState("speaking")
-      speak("이전으로 돌아갈게요.")
-      setTimeout(() => setMicState("off"), 1500)
-      return
-    }
-
-    // 이미지 관련 (자연어 명령어 확장)
-    if (VOICE_COMMANDS.image.test(t) ||
-        (VOICE_COMMANDS.imageKeywords.test(t) && VOICE_COMMANDS.actionKeywords.test(t))) {
-      setMenuState("image")
-      setMicState("off")
-      // 즉시 파일 선택창 열기 (사용자 제스처 컨텍스트 내에서)
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
-      if (fileInput) {
-        fileInput.click()
-      }
-      return
-    }
-
-    // 문서/OCR 관련
-    if (VOICE_COMMANDS.document.test(t)) {
-      setMenuState("ocr")
-      setMicState("off")
-      // 즉시 파일 선택창 열기 (사용자 제스처 컨텍스트 내에서)
-      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
-      if (fileInput) {
-        fileInput.click()
-      }
-      return
-    }
-
-    // 기본 모델 설정
-    if (VOICE_COMMANDS.setDefaultModel.test(t)) {
-      localStorage.setItem("defaultModel", selectedModel)
-      const modelNames: Record<string, string> = {
-        "gemma4:e4b": "구글 4기가",
-        "qwen3.5:9b": "큐쓰리",
-        "qwen3.5:9b-image": "큐쓰리",
-        "gemma4:e2b": "구글 2기가",
-        "llama3.2-vision:11b-instruct-q4_K_M": "라마비전",
-        "richardyoung/olmocr2:7b-q8": "올름오씨알",
-      }
-      const modelName = modelNames[selectedModel] || "선택한 모델"
-      speak(`${modelName}을 기본 모델로 설정했어요.`, speechRate, 1.7, () => {
-        setTimeout(() => setMicState("off"), 1500)
-      })
-      setMicState("speaking")
-      return
-    }
-
-    // 모델 변경
-    if (VOICE_COMMANDS.changeModel.test(t)) {
-      setMenuState("model_select")
-      setMicState("speaking")
-      speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
-        setMicState("off")
-        startListening()
+    // 이미지 업로드 (가장 많이 쓰는 명령)
+    if (/이미지|사진|그림|화면|스크린/.test(t) &&
+        /업로드|분석|읽어|열어|올려|봐줘|해줘|시작/.test(t)) {
+      speak("이미지를 올려주세요.", speechRate, 1.7, () => {
+        setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
       })
       return
     }
 
-    // 종료
-    if (VOICE_COMMANDS.quit.test(t)) {
-      window.speechSynthesis.cancel()
-      bgmManager.stop()  // 완전 종료
-      stt.stopListening()
-      setMicState("speaking")
-      speak("종료합니다.")
-      setTimeout(() => {
-        setMicState("off")
-      }, 1500)
+    // 문서 업로드
+    if (/pdf|문서|파일|서류/.test(t) &&
+        /업로드|분석|읽어|열어|올려|해줘|시작/.test(t)) {
+      speak("문서를 올려주세요.", speechRate, 1.7, () => {
+        setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+      })
       return
     }
 
-    // 완료
-    if (VOICE_COMMANDS.done.test(t)) {
-      setMicState("speaking")
-      speak("네, 알겠어요.")
-      setTimeout(() => setMicState("off"), 1500)
-      return
+    // 모델 선택 번호 (즉시)
+    const modelMap: Record<string, {id: string, name: string}> = {
+      "일번|구글4|구글사|포지|사기가": { id: "gemma4:e4b", name: "구글 4기가" },
+      "이번|큐쓰리|큐스리|큐삼|q3": { id: "qwen3.5:9b", name: "큐쓰리" },
+      "삼번|구글2|구글이|이기가|이지": { id: "gemma4:e2b", name: "구글 2기가" },
+      "사번|라마|라마비전|비전": { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
+      "오번|올름|olmocr": { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" },
+    }
+    for (const [pattern, model] of Object.entries(modelMap)) {
+      if (new RegExp(pattern).test(t)) {
+        setSelectedModel(model.id)
+        if (menuStateRef.current === "model_select" || menuStateRef.current === "confirm") {
+          speak(`${model.name}으로 분석할게요.`, speechRate, 1.7, () => {
+            if (pendingFile) executeAnalysis(pendingFile, model.id)
+          })
+        } else {
+          speak(`${model.name}으로 바꿨어요.`, speechRate)
+        }
+        setMenuState("idle")
+        return
+      }
     }
 
-    // 음악 관련
-    if (/음악꺼|bgm꺼|노래꺼|음악끄|노래끄/.test(t)) {
-      bgmManager.pause()
-      speak("음악을 껐어요.", speechRate)
-      return
-    }
-    if (/음악켜|bgm켜|노래켜|음악시작|노래시작/.test(t)) {
-      bgmManager.start(speechRate)
-      speak("음악을 켰어요.", speechRate)
-      return
-    }
-    if (/중간안내꺼|안내꺼|멘트꺼|안내멘트꺼/.test(t)) {
-      // bgmManager의 announceProgress 비활성화
-      bgmManager.setAnnouncement(false)
-      speak("분석 중 안내 멘트를 껐어요.", speechRate)
-      return
-    }
+    // 음악
+    if (/음악꺼|bgm꺼|노래꺼/.test(t)) { bgmManager.pause(); speak("음악을 껐어요.", speechRate); return }
+    if (/음악켜|bgm켜|노래켜/.test(t)) { bgmManager.start(speechRate); speak("음악을 켰어요.", speechRate); return }
 
     // 처음으로
-    if (/처음으로|처음으로가|처음부터|다시처음|메인으로/.test(t)) {
-      window.speechSynthesis.cancel()
-      bgmManager.pause()
-      setMenuState("idle")
-      setPendingFile(null)
-      speak(INTRO_TTS, speechRate)
+    if (/처음으로|처음부터|메인으로|다시처음/.test(t)) {
+      window.speechSynthesis.cancel(); bgmManager.pause()
+      setMenuState("idle"); setPendingFile(null)
+      speak("처음으로 돌아갈게요. 스페이스바를 누르고 말씀해 주세요.", speechRate)
       return
     }
 
     // 전체 중단
-    if (/이제그만|다그만|그만해|전부꺼|종료|다꺼|앱꺼/.test(t)) {
-      window.speechSynthesis.cancel()
-      bgmManager.pause()
-      setMenuState("idle")
-      setPendingFile(null)
+    if (/이제그만|다그만|그만해|전부꺼|종료/.test(t)) {
+      window.speechSynthesis.cancel(); bgmManager.pause()
+      setMenuState("idle"); setPendingFile(null)
       speak("모두 중단했어요. 스페이스바를 누르시면 다시 시작해요.", speechRate)
       return
     }
 
-    // 다시 시작 (이전 작업 이어서)
-    if (/다시시작|다시해봐|이어서|계속해|다시읽어|다시분석/.test(t)) {
-      if (lastResponse) {
-        speak(lastResponse, speechRate)
-      } else if (pendingFile) {
-        // executeAnalysis 함수를 호출해야 하지만, 여기서는 선택된 모델로 분석 재시작
-        speak("파일을 다시 분석할게요.", speechRate)
-        // TODO: executeAnalysis 함수가 필요하다면 추가
+    // 다시 시작
+    if (/다시시작|다시해봐|이어서|계속해|다시읽어/.test(t)) {
+      if (lastResponse) { speak(lastResponse, speechRate); return }
+      if (pendingFile) { executeAnalysis(pendingFile, selectedModel); return }
+      speak("이어서 할 작업이 없어요.", speechRate)
+      return
+    }
+
+    // 확인/네
+    if (/^(네|예|그래|좋아|맞아|시작해|해줘|응)$/.test(t)) {
+      if (pendingFile && menuStateRef.current === "confirm") {
+        executeAnalysis(pendingFile, selectedModel)
       } else {
-        speak("이어서 할 작업이 없어요. 파일을 올려주세요.", speechRate)
-      }
-      return
-    }
-
-
-    // === 기존 명령어 처리 ===
-
-    // 자연어 속도 명령어
-    if (/천천히|느리게|너무 빨라|빠르잖아|못 알아|모르겠어/.test(t)) {
-      const newRate = Math.max(0.5, speechRate - 0.5)
-      setSpeechRate(newRate)
-      saveSpeechRate(newRate)
-      setMicState("speaking")
-      speak(`속도를 ${newRate}배로 줄였어요.`, newRate, 1.7, () => {
-        setTimeout(() => setMicState("off"), 500)
-      })
-      return
-    }
-
-    if (/더 느리게|더 느려|좀 더 느|더더/.test(t)) {
-      const newRate = Math.max(0.5, speechRate - 0.5)
-      setSpeechRate(newRate)
-      saveSpeechRate(newRate)
-      setMicState("speaking")
-      speak(`${newRate}배속이에요.`, newRate, 1.7, () => {
-        setTimeout(() => setMicState("off"), 500)
-      })
-      return
-    }
-
-    if (/빠르게|빨리|너무 느려|너무 늦어|쫌 빨리|좀더 빨|좀 빨/.test(t)) {
-      const newRate = Math.min(10.0, speechRate + 0.5)
-      setSpeechRate(newRate)
-      saveSpeechRate(newRate)
-      setMicState("speaking")
-      speak(`${newRate}배속으로 빠르게 할게요.`, newRate, 1.7, () => {
-        setTimeout(() => setMicState("off"), 500)
-      })
-      return
-    }
-
-    if (/좋아|괜찮아|이대로|그대로|유지/.test(t)) {
-      setMicState("speaking")
-      speak(`${speechRate}배속 그대로 유지할게요.`, speechRate, 1.7, () => {
-        setTimeout(() => setMicState("off"), 500)
-      })
-      return
-    }
-
-    // 속도 변경 명령 확인
-    const speedCmd = parseSpeedCommand(transcript, isWaitingSpeedChoiceRef.current)
-    if (speedCmd !== null) {
-      if (speedCmd.message === "speed_menu") {
-        setMicState("speaking")
-        const menu = "읽기 속도를 선택해 주세요. 1번, 보통 속도. 2번, 조금 빠르게. 3번, 빠르게. 4번, 매우 빠르게. 번호로 말씀해 주세요."
-        speak(menu, 1.0)
-        isWaitingSpeedChoiceRef.current = true
-        setTimeout(() => setMicState("off"), 3000)
-        return
-      }
-
-      setSpeechRate(speedCmd.rate)
-      saveSpeechRate(speedCmd.rate)
-      setMicState("speaking")
-      speak(speedCmd.message, 1.0)
-      isWaitingSpeedChoiceRef.current = false
-      setTimeout(() => setMicState("off"), 2000)
-      return
-    }
-
-    // 현재 모델 선택 대기 중
-    if (currentMenu === "model_select") {
-      let modelId = ""
-      let modelName = ""
-
-      // fileType에 따라 다른 모델 매핑
-      if (fileType === "image") {
-        // 이미지 모델 (4개)
-        if (/일번|1번|구글.?4|구글.?사|사기가|포기가|뽀기가|사지|포지|사|포|뽀/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 4기가"
-        } else if (/이번|2번|큐|q3|쓰리|스리|삼|큐쓰리|큐스리|큐삼/i.test(t)) {
-          modelId = "qwen3.5:9b-image" // 이미지용 UI ID
-          modelName = "큐쓰리"
-        } else if (/삼번|3번|구글.?2|구글.?이|이기가|투기가|이지|투지|이기|투기/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 2기가"
-        } else if (/사번|4번|라마|라|비전|비|람|마비|마비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        }
-      } else if (fileType === "document") {
-        // 문서 모델 (5개)
-        if (/일번|1번|구글.?4|구글.?사|사기가|포기가|뽀기가|사지|포지|사|포|뽀/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 4기가"
-        } else if (/이번|2번|큐|q3|쓰리|스리|삼|큐쓰리|큐스리|큐삼/i.test(t)) {
-          modelId = "qwen3.5:9b"
-          modelName = "큐쓰리"
-        } else if (/삼번|3번|구글.?2|구글.?이|이기가|투기가|이지|투지|이기|투기/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 2기가"
-        } else if (/사번|4번|라마|라|비전|비|람|마비|마비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        } else if (/오번|5번|올름|olmocr|올름오씨알/i.test(t)) {
-          modelId = "richardyoung/olmocr2:7b-q8"
-          modelName = "올름오씨알"
-        }
-      } else {
-        // fileType이 설정되지 않은 경우 (5개 모델)
-        if (/일번|1번|구글.?4|구글.?사|사기가|포기가|뽀기가|사지|포지|사|포|뽀/i.test(t)) {
-          modelId = "gemma4:e4b"
-          modelName = "구글 4기가"
-        } else if (/이번|2번|큐|q3|쓰리|스리|삼|큐쓰리|큐스리|큐삼/i.test(t)) {
-          modelId = "qwen3.5:9b"
-          modelName = "큐쓰리"
-        } else if (/삼번|3번|구글.?2|구글.?이|이기가|투기가|이지|투지|이기|투기/i.test(t)) {
-          modelId = "gemma4:e2b"
-          modelName = "구글 2기가"
-        } else if (/사번|4번|라마|라|비전|비|람|마비|마비전/i.test(t)) {
-          modelId = "llama3.2-vision:11b-instruct-q4_K_M"
-          modelName = "라마비전"
-        } else if (/오번|5번|올름|olmocr|올름오씨알/i.test(t)) {
-          modelId = "richardyoung/olmocr2:7b-q8"
-          modelName = "올름오씨알"
-        }
-      }
-
-      if (modelId) {
-        setSelectedModel(modelId)
-        setPendingAction(`model:${modelId}`)
-
-        // 확인 단계 건너뛰고 바로 분석 시작
-        const startMsg = `${modelName}으로 분석을 시작할게요.`
-        speak(startMsg, speechRate, 1.7, () => {
-          executeCurrentAction()
-        })
-        setMicState("processing")
-      } else {
-        const maxNum = fileType === "image" ? "사번" : fileType === "document" ? "오번" : "오번"
-        speak(`죄송해요, 잘 못 들었어요. 일번부터 ${maxNum} 중에 번호로 말씀해 주세요.`, speechRate, 1.7, () => {
-          setTimeout(() => {
-            setMicState("off")
-            startListening()
-          }, 300)
-        })
-        setMicState("speaking")
-      }
-      return
-    }
-
-    // 현재 확인 대기 중
-    if (currentMenu === "confirm") {
-      if (/그래|좋아|네|예|맞아|실행|해줘|시작/.test(t)) {
-        executeCurrentAction()
-        return
-      }
-      if (/아니|취소|싫어|말고/.test(t)) {
-        const msg1 = "알겠어요, 모델 선택으로 돌아갈게요."
-        speak(msg1, speechRate, 1.7, () => {
-          setMenuState("model_select")
-          speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
-            setTimeout(() => {
-              setMicState("off")
-              startListening()
-            }, 300)
-          })
-        })
-        return
-      }
-      // 네/아니오가 아닌 경우
-      speak("네 또는 아니오로 말씀해 주세요.", speechRate, 1.7, () => {
-        setTimeout(() => {
-          setMicState("off")
-          startListening()
-        }, 300)
-      })
-      return
-    }
-
-    // 다국어 지원 예정: language_select 메뉴 처리 로직 추가 가능
-    // if (currentMenu === "language_select") { ... }
-
-    // 일반 상태 - 의도 파악
-    const intent = await detectIntent(transcript)
-
-    switch (intent) {
-      case "search":
-        setMicState("speaking")
-        speak("네, 바로 찾아드릴게요.")
-        setTimeout(() => doChat(transcript), 1500)
-        break
-      case "ocr":
-        setMenuState("ocr")
-        setMicState("off")
-        // 즉시 파일 선택창 열기
-        const fileInput1 = document.querySelector('input[type="file"]') as HTMLInputElement
-        if (fileInput1) fileInput1.click()
-        break
-      case "image":
-        setMenuState("image")
-        setMicState("off")
-        // 즉시 파일 선택창 열기
-        const fileInput2 = document.querySelector('input[type="file"]') as HTMLInputElement
-        if (fileInput2) fileInput2.click()
-        break
-      case "model_change":
-        setMenuState("model_select")
-        speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
-          setMicState("off")
-          startListening()
-        })
-        break
-      case "confirm":
-        executeCurrentAction()
-        break
-      case "cancel":
-        setMicState("speaking")
-        speak("알겠어요, 취소할게요.")
-        setTimeout(() => {
-          speak(MAIN_MENU_TTS)
-          setMenuState("main_menu")
-          const delay = (MAIN_MENU_TTS.length / 10) * 1000 / speechRate + 500
-          setTimeout(() => setMicState("off"), delay)
-        }, 1500)
-        break
-      case "restart":
-        setMicState("speaking")
-        speak("처음으로 돌아갈게요.")
-        setTimeout(() => {
-          speak(INTRO_TTS)
-          setMenuState("idle")
-          const delay = (INTRO_TTS.length / 10) * 1000 / speechRate + 500
-          setTimeout(() => setMicState("off"), delay)
-        }, 1000)
-        break
-      case "menu_1":
-        handleMenuChoice(1)
-        break
-      case "menu_2":
-        handleMenuChoice(2)
-        break
-      case "menu_3":
-        handleMenuChoice(3)
-        break
-      case "menu_4":
-        handleMenuChoice(4)
-        break
-      case "menu_5":
-        handleMenuChoice(5)
-        break
-      case "menu_6":
-        handleMenuChoice(6)
-        break
-      case "chat":
-      default:
         doChat(transcript)
-        break
+      }
+      return
     }
-  }
 
-  const detectIntent = async (text: string): Promise<string> => {
-    const t = text.toLowerCase()
-
-    if (/검색|찾아|알려|뭐야|어때/.test(t)) return "search"
-    if (/문서|읽어|오씨알|ocr|파일|pdf/.test(t)) return "ocr"
-    if (/이미지|사진|그림/.test(t)) return "image"
-    if (/모델|바꿔|바꾸기/.test(t)) return "model_change"
-    if (/그래|그렇다|좋아|네|예|맞아|실행|시작|해줘/.test(t)) return "confirm"
-    if (/아니|취소|싫어|말고/.test(t)) return "cancel"
-    if (/처음|돌아가|시작으로/.test(t)) return "restart"
-
-    if (/일번|1번/.test(t)) return "menu_1"
-    if (/이번|2번/.test(t)) return "menu_2"
-    if (/삼번|3번/.test(t)) return "menu_3"
-    if (/사번|4번/.test(t)) return "menu_4"
-    if (/오번|5번/.test(t)) return "menu_5"
-    if (/육번|6번/.test(t)) return "menu_6"
-
-    return "chat"
-  }
-
-  const handleMenuChoice = (num: number) => {
-    if (menuStateRef.current === "main_menu") {
-      switch (num) {
-        case 1:
-          speak("검색 모드예요. 검색할 내용을 말씀해 주세요.", speechRate, 1.7, () => {
-            setTimeout(() => {
-              setMicState("off")
-              startListening()
-            }, 300)
-          })
-          break
-        case 2:
-          speak("이미지 분석 모드예요. 파일을 올려주세요.", speechRate, 1.7, () => {
-            setMenuState("image")
-            setMicState("off")
-          })
-          break
-        case 3:
-          speak("문서 읽기 모드예요. 파일을 올려주시거나 카메라 버튼을 눌러주세요.", speechRate, 1.7, () => {
-            setMenuState("ocr")
-            setMicState("off")
-          })
-          break
-        case 4:
-          setMenuState("model_select")
-          speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
-            setTimeout(() => {
-              setMicState("off")
-              startListening()
-            }, 300)
-          })
-          break
-        case 5:
-          speak("처음으로 돌아갈게요.", speechRate, 1.7, () => {
-            setTimeout(() => {
-              speak(INTRO_TTS, speechRate, 1.7, () => {
-                setMenuState("idle")
-                setMicState("off")
-              })
-            }, 300)
-          })
-          break
-      }
-    } else if (menuStateRef.current === "model_select") {
-      let models: Array<{ id: string; name: string }> = []
-
-      if (fileType === "image") {
-        models = [
-          { id: "gemma4:e4b", name: "구글 4기가" },
-          { id: "qwen3.5:9b", name: "큐쓰리" },
-          { id: "gemma4:e2b", name: "구글 2기가" },
-          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" }
-        ]
-      } else if (fileType === "document") {
-        models = [
-          { id: "gemma4:e4b", name: "구글 4기가" },
-          { id: "qwen3.5:9b", name: "큐쓰리" },
-          { id: "gemma4:e2b", name: "구글 2기가" },
-          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
-          { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" }
-        ]
-      } else {
-        // 기존 로직 (fileType 없는 경우)
-        models = [
-          { id: "gemma4:e4b", name: "구글 4기가" },
-          { id: "qwen3.5:9b", name: "큐쓰리" },
-          { id: "gemma4:e2b", name: "구글 2기가" },
-          { id: "llama3.2-vision:11b-instruct-q4_K_M", name: "라마비전" },
-          { id: "richardyoung/olmocr2:7b-q8", name: "올름오씨알" }
-        ]
-      }
-
-      if (num >= 1 && num <= models.length) {
-        const model = models[num - 1]
-        setSelectedModel(model.id)
-        setPendingAction(`model:${model.id}`)
-
-        let confirmMsg = ""
-        if (model.id === "llama3.2-vision:11b-instruct-q4_K_M") {
-          confirmMsg = `${model.name}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
-        } else {
-          confirmMsg = `${model.name}으로 분석해 드릴까요? 스페이스바를 누르고 네 또는 아니오로 말씀해 주세요.`
-        }
-
-        speak(confirmMsg, speechRate, 1.7, () => {
-          setMenuState("confirm")
-          setTimeout(() => {
-            setMicState("off")
-            startListening()
-          }, 300)
-        })
-      }
+    // ── LLM 처리 (위에서 안 걸린 경우) ─────────────
+    // 모델 변경 요청인지만 확인 후 나머지는 채팅
+    if (/모델|바꿔|변경|다른모델/.test(t)) {
+      setMenuState("model_select")
+      speak("어떤 모델로 바꿔드릴까요? 일번 구글 4기가, 이번 큐쓰리, 삼번 구글 2기가, 사번 라마비전, 오번 올름오씨알이에요.", speechRate)
+      return
     }
+
+    // 나머지: 일반 채팅
+    doChat(transcript)
   }
 
   const executeCurrentAction = () => {
