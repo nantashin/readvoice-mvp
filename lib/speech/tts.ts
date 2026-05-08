@@ -184,8 +184,10 @@ export function cleanForTTS(text: string): string {
 
   // 4. 특수 불릿/화살표 기호 완전 제거 (남은 것들)
   processed = processed
-    .replace(/[·•●◆◇■□▶▷★☆✅✔✓☑※\*]/g, '')
+    .replace(/[·•●◆◇■□▶▷★☆✅✔✓☑※\*\-–—]/g, '')
     .replace(/[→➡⇒⟶]/g, '')
+    // 문장 중간 하이픈은 유지 (숫자/단어 사이 제외)
+    .replace(/(?<!\w)-(?!\w)/g, '')
 
   // 5. 큰 숫자 자릿수 변환 (보호된 패턴 제외)
   processed = processed.replace(/(\d{4,})/g, (n) => formatLargeNumber(n))

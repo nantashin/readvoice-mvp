@@ -444,6 +444,58 @@ export default function Home() {
       return
     }
 
+    // 음악 관련
+    if (/음악꺼|bgm꺼|노래꺼|음악끄|노래끄/.test(t)) {
+      bgmManager.pause()
+      speak("음악을 껐어요.", speechRate)
+      return
+    }
+    if (/음악켜|bgm켜|노래켜|음악시작|노래시작/.test(t)) {
+      bgmManager.start(speechRate)
+      speak("음악을 켰어요.", speechRate)
+      return
+    }
+    if (/중간안내꺼|안내꺼|멘트꺼|안내멘트꺼/.test(t)) {
+      // bgmManager의 announceProgress 비활성화
+      bgmManager.setAnnouncement(false)
+      speak("분석 중 안내 멘트를 껐어요.", speechRate)
+      return
+    }
+
+    // 처음으로
+    if (/처음으로|처음으로가|처음부터|다시처음|메인으로/.test(t)) {
+      window.speechSynthesis.cancel()
+      bgmManager.pause()
+      setMenuState("idle")
+      setPendingFile(null)
+      speak(INTRO_TTS, speechRate)
+      return
+    }
+
+    // 전체 중단
+    if (/이제그만|다그만|그만해|전부꺼|종료|다꺼|앱꺼/.test(t)) {
+      window.speechSynthesis.cancel()
+      bgmManager.pause()
+      setMenuState("idle")
+      setPendingFile(null)
+      speak("모두 중단했어요. 스페이스바를 누르시면 다시 시작해요.", speechRate)
+      return
+    }
+
+    // 다시 시작 (이전 작업 이어서)
+    if (/다시시작|다시해봐|이어서|계속해|다시읽어|다시분석/.test(t)) {
+      if (lastResponse) {
+        speak(lastResponse, speechRate)
+      } else if (pendingFile) {
+        // executeAnalysis 함수를 호출해야 하지만, 여기서는 선택된 모델로 분석 재시작
+        speak("파일을 다시 분석할게요.", speechRate)
+        // TODO: executeAnalysis 함수가 필요하다면 추가
+      } else {
+        speak("이어서 할 작업이 없어요. 파일을 올려주세요.", speechRate)
+      }
+      return
+    }
+
 
     // === 기존 명령어 처리 ===
 

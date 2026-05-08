@@ -13,6 +13,7 @@ class BGMManager {
   private normalVolume = 0.4
   private duckVolume = 0.08
   private announcementRate = 1.0
+  private announcementEnabled = true
 
   /**
    * 최초 1회만 초기화 (이후 일시정지/재개)
@@ -111,6 +112,22 @@ class BGMManager {
    */
   isPlaying(): boolean {
     return this.audio !== null && !this.audio.paused
+  }
+
+  /**
+   * 안내 멘트 활성화/비활성화
+   */
+  setAnnouncement(enabled: boolean): void {
+    this.announcementEnabled = enabled
+    console.log(`[BGM] 안내 멘트 ${enabled ? '활성화' : '비활성화'}`)
+  }
+
+  /**
+   * 분석 중 안내 멘트 재생 (announcementEnabled가 true일 때만)
+   */
+  announceProgress(): void {
+    if (!this.announcementEnabled) return
+    // 기존 코드 유지 (현재는 없음, 나중에 구현 예정)
   }
 }
 

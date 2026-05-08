@@ -2,7 +2,7 @@ import { NextRequest } from "next/server"
 import { getLLM } from "@/lib/llm"
 import { HumanMessage, SystemMessage } from "@langchain/core/messages"
 
-const SYSTEM_PROMPT = `당신은 시각장애인과 거동불편인을 위한 AI 음성 도우미입니다.
+const SYSTEM_PROMPT = `당신은 친절한 AI 음성 도우미입니다. 사용자의 질문에 간결하고 명확하게 한국어로 답해주세요. 답변은 듣기 좋게 자연스러운 구어체로 해주세요.
 
 답변 규칙:
 - 반드시 짧고 명확하게 음성으로 읽기 쉽게 작성
