@@ -1,15 +1,45 @@
 # 세션 요약 — 2026-05-08
 
 ## 작업 시간
-- **생성 시각:** 2026-05-08 09:15:50
-- **현재 버전:** v2.8.0
+- **생성 시각:** 2026-05-08 17:33:35
+- **현재 버전:** v2.8.2
 - **브랜치:** master
 
 ## 오늘의 커밋 ()
-  - 오늘 커밋 없음
+  - e014556: docs: 서비스 전략 재검토 문서 추가
+  - c219cd6: feat: 키워드 우선 처리 및 마이크 자동 종료
+  - d1fcdfa: feat: 접근성 개선 및 자연어 명령 확장
+  - b294a72: feat: 계정 전환 자동화 스크립트 최종본
+  - 163555c: feat: 일일 보고서 자동화 강화
+  - 92604db: docs: 일일 보고서 자동 생성 (2026-05-08)
 
 ## 변경된 파일
-  - 변경된 파일 없음
+  - .claude/settings.local.json
+  - app/api/chat/route.ts
+  - app/page.tsx
+  - docs/daily-reports/2026-05-08-session-summary.md
+  - docs/daily-reports/2026-05-08.md
+  - docs/daily-reports/roadmap_20260508.pptx
+  - docs/roadmap-data.json
+  - docs/versions/VERSION_HISTORY.md
+  - docs/versions/v2.8.2/CLAUDE.md
+  - docs/versions/v2.8.2/app_api_ocr_route.ts
+  - docs/versions/v2.8.2/app_components_FileUpload.tsx
+  - docs/versions/v2.8.2/app_components_MicButton.tsx
+  - docs/versions/v2.8.2/app_page.tsx
+  - docs/versions/v2.8.2/lib_audio_bgm-manager.ts
+  - docs/versions/v2.8.2/lib_speech_stt.ts
+  - docs/versions/v2.8.2/modules_ocr_gemini.ts
+  - docs/versions/v2.8.2/modules_ocr_ocr-engine.ts
+  - docs/versions/v2.8.2/modules_ocr_pdf.ts
+  - docs/versions/v2.8.2/server_glm-ocr.py
+  - docs/versions/v2.8.2/server_pdf-to-image.py
+  - docs/versions/v2.8.2/version-meta.json
+  - lib/audio/bgm-manager.ts
+  - lib/speech/stt.ts
+  - lib/speech/tts.ts
+  - scripts/daily-report.ps1
+  - scripts/switch-account.ps1
 
 ## 현재 이슈
 
