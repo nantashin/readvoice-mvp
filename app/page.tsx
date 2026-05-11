@@ -76,6 +76,7 @@ export default function Home() {
   const micStateRef = useRef<MicState>("off")
   const menuStateRef = useRef<MenuState>("idle")
   const isWaitingSpeedChoiceRef = useRef<boolean>(false)
+  const recommendTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const stt = useSpeechRecognition()
   const tts = useSpeechSynthesis()
@@ -160,7 +161,15 @@ export default function Home() {
   }, [response])
 
   const speak = useCallback((text: string, rate?: number, pitch: number = 1.7, onEnd?: () => void) => {
+    // 기존 TTS 즉시 중단
     window.speechSynthesis.cancel()
+
+    // 추천 타이머 즉시 취소 (새로운 speak 호출 시 기존 타이머 모두 제거)
+    if (recommendTimerRef.current) {
+      clearTimeout(recommendTimerRef.current)
+      recommendTimerRef.current = null
+    }
+
     // TTS 전처리: 불릿/특수기호 제거, 마크다운 정리
     const cleanedText = cleanForTTS(text)
     const utt = new SpeechSynthesisUtterance(cleanedText)
@@ -378,8 +387,17 @@ export default function Home() {
 
   // 파일명으로 파일 로드
   const loadFileByName = async (fileName: string) => {
+    console.log(`[loadFileByName] 시작: ${fileName}`)
     try {
-      speak(`${fileName.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}를 선택했어요. 파일을 읽고 있어요.`, speechRate, 1.7, async () => {
+      // 추천 타이머 취소
+      if (recommendTimerRef.current) {
+        clearTimeout(recommendTimerRef.current)
+        recommendTimerRef.current = null
+        console.log("[loadFileByName] 추천 타이머 취소됨")
+      }
+
+      speak(`${fileName.replace(/\.(jpg|jpeg|png|webp|pdf|txt|docx|doc|ppt|pptx)$/i, '')}를 선택했어요. 파일을 읽고 있어요.`, speechRate, 1.7, async () => {
+        console.log("[loadFileByName] TTS 완료, 파일 읽기 시작")
         const res = await fetch(`/api/read-file?file=${encodeURIComponent(fileName)}`)
         const data = await res.json()
 
@@ -491,6 +509,12 @@ export default function Home() {
 
     // ── 파일 선택 모드 처리 ──────────────
     if (menuStateRef.current === "file_select") {
+      // 추천 타이머 즉시 취소
+      if (recommendTimerRef.current) {
+        clearTimeout(recommendTimerRef.current)
+        recommendTimerRef.current = null
+      }
+
       // 번호로 선택
       const numMatch = transcript.match(/일번|1번|이번|2번|삼번|3번|사번|4번|오번|5번/)
       if (numMatch) {
@@ -500,20 +524,28 @@ export default function Home() {
         }
         const num = numMap[numMatch[0]]
         if (uploadFiles[num]) {
+          setMenuState("loading")  // 즉시 상태 변경
           loadFileByName(uploadFiles[num].name)
           return
         }
       }
 
-      // 파일명으로 선택 (부분 매칭)
-      const matchedFile = uploadFiles.find(f =>
-        f.name.toLowerCase().includes(transcript.toLowerCase()) ||
-        transcript.toLowerCase().includes(f.name.toLowerCase().replace(/\.(jpg|jpeg|png|webp|pdf)$/i, ''))
-      )
+      // 파일명으로 선택 (부분 매칭, 공백 무시)
+      const normalizedInput = transcript.replace(/\s/g, '').toLowerCase()
+      const matchedFile = uploadFiles.find(f => {
+        const normalizedFileName = f.name.replace(/\s/g, '').toLowerCase()
+        const normalizedFileNameNoExt = normalizedFileName.replace(/\.(jpg|jpeg|png|webp|pdf|txt|docx|doc|ppt|pptx)$/i, '')
+        return normalizedFileName.includes(normalizedInput) ||
+               normalizedFileNameNoExt.includes(normalizedInput) ||
+               normalizedInput.includes(normalizedFileNameNoExt)
+      })
 
       if (matchedFile) {
+        console.log(`[파일 선택] 매칭: "${transcript}" → "${matchedFile.name}"`)
+        setMenuState("loading")  // 즉시 상태 변경
         loadFileByName(matchedFile.name)
       } else {
+        console.log(`[파일 선택] 매칭 실패: "${transcript}"`)
         speak("파일을 찾을 수 없어요. 다시 말씀해 주세요.", speechRate)
       }
       return
@@ -554,52 +586,63 @@ export default function Home() {
     if (/이미지|사진|그림|화면|스크린/.test(t) &&
         /업로드|분석|읽어|열어|올려|봐줘|해줘|시작/.test(t)) {
       // 바로 폴더 파일 목록 가져오기
-      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
-        try {
-          const res = await fetch("/api/watch-folder")
-          const data = await res.json()
-          const files = data.files || []
+      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, () => {
+        console.log("[파일 목록] TTS 완료, 폴더 열기 + API 호출 시작")
 
-          if (files.length === 0) {
-            speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
-            return
-          }
+        // Windows 탐색기로 폴더 열기
+        fetch("/api/open-folder", { method: "POST" })
+          .then(() => console.log("[폴더] 열림"))
+          .catch(e => console.error("[폴더] 열기 실패:", e))
 
-          setUploadFiles(files)
-          setMenuState("file_list")
+        // 파일 목록 가져오기
+        fetch("/api/watch-folder")
+          .then(res => res.json())
+          .then(data => {
+            const files = data.files || []
+            console.log("[파일 목록] 파일:", files.length, "개")
 
-          // 파일 목록 읽어주기
-          const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
-            `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
-          ).join(". ")
+            if (files.length === 0) {
+              speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
+              return
+            }
 
-          const message = files.length > 5
-            ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
-            : `${fileList}. 파일 이름을 말씀해 주세요.`
+            setUploadFiles(files)
+            setMenuState("file_list")
 
-          speak(message, speechRate, 1.7, () => {
-            setMenuState("file_select")
-            playMicOn()
-            setTimeout(() => {
-              stt.startListening()
-              setMicState("listening")
-            }, 200)
+            // 파일 목록 읽어주기
+            const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
+              `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+            ).join(". ")
 
-            // 3초 무응답 시 추천
-            setTimeout(() => {
-              if (menuStateRef.current === "file_select") {
-                speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
-                  loadFileByName(files[0].name)
-                })
-              }
-            }, 3000)
+            const message = files.length > 5
+              ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
+              : `${fileList}. 파일 이름을 말씀해 주세요.`
+
+            speak(message, speechRate, 1.7, () => {
+              setMenuState("file_select")
+              playMicOn()
+              setTimeout(() => {
+                stt.startListening()
+                setMicState("listening")
+              }, 200)
+
+              // 3초 무응답 시 추천 (파일 선택 시 취소됨)
+              if (recommendTimerRef.current) clearTimeout(recommendTimerRef.current)
+              recommendTimerRef.current = setTimeout(() => {
+                if (menuStateRef.current === "file_select") {
+                  speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
+                    loadFileByName(files[0].name)
+                  })
+                }
+              }, 3000)
+            })
           })
-        } catch (e) {
-          console.error("[파일 목록] 에러:", e)
-          speak("폴더를 열 수 없어요. 파일 선택 창을 열게요.", speechRate, 1.7, () => {
-            setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+          .catch(e => {
+            console.error("[파일 목록] 에러:", e)
+            speak("폴더를 열 수 없어요. 파일 선택 창을 열게요.", speechRate, 1.7, () => {
+              setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+            })
           })
-        }
       })
       return
     }
@@ -609,50 +652,61 @@ export default function Home() {
     if (/pdf|문서|파일|서류/.test(t) &&
         /업로드|분석|읽어|열어|올려|해줘|시작|있어/.test(t)) {
       // 바로 폴더 파일 목록 가져오기
-      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
-        try {
-          const res = await fetch("/api/watch-folder")
-          const data = await res.json()
-          const files = data.files || []
+      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, () => {
+        console.log("[문서 목록] TTS 완료, 폴더 열기 + API 호출 시작")
 
-          if (files.length === 0) {
-            speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
-            return
-          }
+        // Windows 탐색기로 폴더 열기
+        fetch("/api/open-folder", { method: "POST" })
+          .then(() => console.log("[폴더] 열림"))
+          .catch(e => console.error("[폴더] 열기 실패:", e))
 
-          setUploadFiles(files)
-          setMenuState("file_list")
+        // 파일 목록 가져오기
+        fetch("/api/watch-folder")
+          .then(res => res.json())
+          .then(data => {
+            const files = data.files || []
+            console.log("[문서 목록] 파일:", files.length, "개")
 
-          // 파일 목록 읽어주기
-          const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
-            `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
-          ).join(". ")
+            if (files.length === 0) {
+              speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
+              return
+            }
 
-          const message = files.length > 5
-            ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
-            : `${fileList}. 파일 이름을 말씀해 주세요.`
+            setUploadFiles(files)
+            setMenuState("file_list")
 
-          speak(message, speechRate, 1.7, () => {
-            setMenuState("file_select")
-            playMicOn()
-            setTimeout(() => {
-              stt.startListening()
-              setMicState("listening")
-            }, 200)
+            // 파일 목록 읽어주기
+            const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
+              `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+            ).join(". ")
 
-            // 3초 무응답 시 추천
-            setTimeout(() => {
-              if (menuStateRef.current === "file_select") {
-                speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
-                  loadFileByName(files[0].name)
-                })
-              }
-            }, 3000)
+            const message = files.length > 5
+              ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
+              : `${fileList}. 파일 이름을 말씀해 주세요.`
+
+            speak(message, speechRate, 1.7, () => {
+              setMenuState("file_select")
+              playMicOn()
+              setTimeout(() => {
+                stt.startListening()
+                setMicState("listening")
+              }, 200)
+
+              // 3초 무응답 시 추천 (파일 선택 시 취소됨)
+              if (recommendTimerRef.current) clearTimeout(recommendTimerRef.current)
+              recommendTimerRef.current = setTimeout(() => {
+                if (menuStateRef.current === "file_select") {
+                  speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
+                    loadFileByName(files[0].name)
+                  })
+                }
+              }, 3000)
+            })
           })
-        } catch (e) {
-          console.error("[파일 목록] 에러:", e)
-          speak("폴더를 열 수 없어요.", speechRate)
-        }
+          .catch(e => {
+            console.error("[파일 목록] 에러:", e)
+            speak("폴더를 열 수 없어요.", speechRate)
+          })
       })
       return
     }

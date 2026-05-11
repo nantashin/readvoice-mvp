@@ -2,8 +2,8 @@
  * 세션 관리자 - 자동 클리닝 및 초기화
  */
 
-const SESSION_TIMEOUT = 60000 // 60초 - 마지막 활동 후 자동 종료
-const FEEDBACK_WINDOW = 10000 // 10초 - 분석 완료 후 피드백 받는 시간
+const SESSION_TIMEOUT = 600000 // 10분 - 마지막 활동 후 자동 종료 (사용자가 완전히 끝날 때까지 충분한 시간)
+const FEEDBACK_WINDOW = 30000 // 30초 - 분석 완료 후 피드백 받는 시간
 
 class SessionManager {
   private sessionTimer: NodeJS.Timeout | null = null
@@ -137,14 +137,14 @@ class SessionManager {
   }
 
   /**
-   * 업로드 폴더 정리
+   * 세션 정리 (로컬 스토리지만 정리, 파일은 삭제 안 함)
    */
   private async cleanupUploadFolder(): Promise<void> {
     try {
       await fetch("/api/cleanup-session", { method: "POST" })
-      console.log("[세션] 업로드 폴더 정리 완료")
+      console.log("[세션] 정리 완료 (파일은 유지)")
     } catch (e) {
-      console.error("[세션] 폴더 정리 실패:", e)
+      console.error("[세션] 정리 실패:", e)
     }
   }
 

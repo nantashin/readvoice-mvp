@@ -7,39 +7,16 @@ export async function POST() {
   try {
     console.log("[클리닝] 세션 정리 시작")
 
-    // 업로드 폴더의 파일 목록
-    if (!fs.existsSync(UPLOAD_FOLDER)) {
-      return Response.json({ success: true, message: "폴더 없음" })
-    }
+    // CRITICAL: 업로드 폴더는 사용자가 수동으로 관리하는 영구 저장소입니다.
+    // 파일을 자동으로 삭제하면 사용자의 작업 파일이 사라집니다.
+    // 세션 정리는 브라우저 캐시와 로컬 스토리지만 정리하고,
+    // 파일 삭제는 사용자가 직접 수행해야 합니다.
 
-    const files = fs.readdirSync(UPLOAD_FOLDER)
-    const now = Date.now()
-    const ONE_HOUR = 60 * 60 * 1000
-
-    let deletedCount = 0
-
-    // 1시간 이상 된 파일 삭제 (최근 세션은 유지)
-    files.forEach(file => {
-      const filePath = path.join(UPLOAD_FOLDER, file)
-      const stats = fs.statSync(filePath)
-      const fileAge = now - stats.mtimeMs
-
-      if (fileAge > ONE_HOUR) {
-        try {
-          fs.unlinkSync(filePath)
-          deletedCount++
-          console.log(`[클리닝] 삭제: ${file}`)
-        } catch (e) {
-          console.error(`[클리닝] 삭제 실패: ${file}`, e)
-        }
-      }
-    })
-
-    console.log(`[클리닝] 완료 - ${deletedCount}개 파일 삭제`)
+    console.log("[클리닝] 완료 - 파일 삭제 안 함 (사용자 영구 저장소)")
 
     return Response.json({
       success: true,
-      message: `${deletedCount}개 파일 정리 완료`
+      message: "세션 정리 완료 (파일은 유지됨)"
     })
   } catch (e) {
     console.error("[클리닝] 오류:", e)

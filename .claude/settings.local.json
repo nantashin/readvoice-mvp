@@ -51,7 +51,9 @@
       "Bash(cp modules/ocr/gemini.ts docs/versions/v2.8.0/modules_ocr_gemini.ts)",
       "Bash(pwsh:*)",
       "Bash(mv:*)",
-      "Bash(tasklist //FI \"PID eq 65960\")"
+      "Bash(tasklist //FI \"PID eq 65960\")",
+      "Bash(curl -s http://localhost:3000/api/watch-folder)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

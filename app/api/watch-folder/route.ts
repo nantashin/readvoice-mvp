@@ -12,7 +12,13 @@ export async function GET() {
     }
 
     const files = fs.readdirSync(UPLOAD_FOLDER)
-      .filter(f => /\.(jpg|jpeg|png|webp|pdf)$/i.test(f))
+      .filter(f => {
+        // 숨김 파일 제외
+        if (f.startsWith('.')) return false
+        // 파일인지 확인
+        const fullPath = path.join(UPLOAD_FOLDER, f)
+        return fs.statSync(fullPath).isFile()
+      })
       .map(f => ({
         name: f,
         path: path.join(UPLOAD_FOLDER, f),
