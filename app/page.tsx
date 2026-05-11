@@ -10,7 +10,7 @@ import { bgmManager } from "@/lib/audio/bgm-manager"
 import { playMicOn, playMicOff } from "@/lib/audio/mic-sound"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select" | "choose_source" | "camera_capture" | "camera_title"
 // 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
 
@@ -71,6 +71,9 @@ export default function Home() {
   const [showYoutube, setShowYoutube] = useState(false)
   const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
   const [selectedFileName, setSelectedFileName] = useState<string>("")
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
+  const [capturedImage, setCapturedImage] = useState<string>("")
+  const videoRef = useRef<HTMLVideoElement>(null)
 
   const micStateRef = useRef<MicState>("off")
   const menuStateRef = useRef<MenuState>("idle")
@@ -546,8 +549,38 @@ export default function Home() {
     // 이미지 업로드 (가장 많이 쓰는 명령)
     if (/이미지|사진|그림|화면|스크린/.test(t) &&
         /업로드|분석|읽어|열어|올려|봐줘|해줘|시작/.test(t)) {
-      // 폴더 파일 목록 가져오기
-      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
+      // 소스 선택 안내
+      setMenuState("choose_source")
+      speak("화면을 읽어드릴까요? 가지고 계신 사진이나 서류가 있으신가요?", speechRate, 1.7, () => {
+        playMicOn()
+        setTimeout(() => {
+          stt.startListening()
+          setMicState("listening")
+        }, 200)
+      })
+      return
+    }
+
+    // ── 소스 선택 모드 처리 ──────────────
+    if (menuStateRef.current === "choose_source") {
+      // 화면 캡처 / 현재 페이지
+      if (/화면|스크린|페이지|웹|여기|이거/.test(t)) {
+        speak("현재 화면을 분석할게요. 잠시만 기다려 주세요.", speechRate, 1.7, () => {
+          captureScreen()
+        })
+        return
+      }
+
+      // 카메라 촬영
+      if (/촬영|사진찍|카메라|찍어|새로/.test(t)) {
+        startCamera()
+        return
+      }
+
+      // 폴더에서 선택
+      if (/폴더|파일|있어|가지고|선택/.test(t)) {
+        // 폴더 파일 목록 가져오기
+        speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
         try {
           const res = await fetch("/api/watch-folder")
           const data = await res.json()
@@ -594,6 +627,34 @@ export default function Home() {
           })
         }
       })
+      return
+      }
+      return
+    }
+
+    // ── 카메라 촬영 모드 처리 ──────────────
+    if (menuStateRef.current === "camera_capture") {
+      if (/찍어|촬영|찍기|셔터/.test(t)) {
+        capturePhoto()
+      } else if (/취소|그만|꺼/.test(t)) {
+        if (cameraStream) {
+          cameraStream.getTracks().forEach(track => track.stop())
+          setCameraStream(null)
+        }
+        speak("카메라를 껐어요.", speechRate)
+        setMenuState("idle")
+      }
+      return
+    }
+
+    // ── 카메라 제목 입력 모드 처리 ──────────────
+    if (menuStateRef.current === "camera_title") {
+      const title = transcript.trim()
+      if (!title || title.length < 2) {
+        speak("제목을 다시 말씀해 주세요.", speechRate)
+        return
+      }
+      saveCapturedImage(title)
       return
     }
 
@@ -733,6 +794,103 @@ export default function Home() {
       })
 
       setPendingAction("")
+    }
+  }
+
+  // 화면 캡처
+  const captureScreen = async () => {
+    try {
+      // html2canvas 또는 현재 페이지 분석 (간단 버전: DOM 텍스트 추출)
+      const pageText = document.body.innerText.slice(0, 2000)
+      speak(`현재 페이지를 분석했어요. ${pageText}`, speechRate)
+      setMenuState("idle")
+    } catch (e) {
+      console.error("[화면 캡처] 에러:", e)
+      speak("화면을 읽을 수 없어요.", speechRate)
+    }
+  }
+
+  // 카메라 시작
+  const startCamera = async () => {
+    try {
+      speak("카메라를 켜고 있어요. 준비되면 '찍어' 또는 '촬영'이라고 말씀해 주세요.", speechRate)
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" } // 후면 카메라 우선
+      })
+
+      setCameraStream(stream)
+      setMenuState("camera_capture")
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play()
+      }
+    } catch (e) {
+      console.error("[카메라] 에러:", e)
+      speak("카메라를 열 수 없어요. 권한을 확인해 주세요.", speechRate)
+    }
+  }
+
+  // 카메라 촬영
+  const capturePhoto = () => {
+    if (!videoRef.current || !cameraStream) {
+      speak("카메라가 준비되지 않았어요.", speechRate)
+      return
+    }
+
+    const canvas = document.createElement("canvas")
+    canvas.width = videoRef.current.videoWidth
+    canvas.height = videoRef.current.videoHeight
+    const ctx = canvas.getContext("2d")
+    ctx?.drawImage(videoRef.current, 0, 0)
+
+    const imageData = canvas.toDataURL("image/jpeg", 0.9)
+    setCapturedImage(imageData)
+
+    // 카메라 끄기
+    cameraStream.getTracks().forEach(track => track.stop())
+    setCameraStream(null)
+
+    // 제목 입력 요청
+    setMenuState("camera_title")
+    speak("사진을 찍었어요. 어떤 제목으로 저장할까요?", speechRate, 1.7, () => {
+      playMicOn()
+      setTimeout(() => {
+        stt.startListening()
+        setMicState("listening")
+      }, 200)
+    })
+  }
+
+  // 촬영한 이미지 저장
+  const saveCapturedImage = async (title: string) => {
+    try {
+      speak(`${title}로 저장하고 있어요.`, speechRate, 1.7, async () => {
+        // Base64 이미지를 서버에 저장
+        const res = await fetch("/api/save-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            imageData: capturedImage
+          })
+        })
+
+        const data = await res.json()
+
+        if (data.error) {
+          speak("저장에 실패했어요. 다시 시도해 주세요.", speechRate)
+          return
+        }
+
+        speak(`${title}를 저장했어요. 분석을 시작할게요.`, speechRate, 1.7, () => {
+          loadFileByName(data.fileName)
+        })
+      })
+    } catch (e) {
+      console.error("[이미지 저장] 에러:", e)
+      speak("저장 중 오류가 발생했어요.", speechRate)
     }
   }
 
@@ -1014,6 +1172,42 @@ export default function Home() {
             }}
           />
         </div>
+
+        {/* 카메라 비디오 */}
+        {menuState === "camera_capture" && (
+          <div style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            background: "black",
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center"
+          }}>
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              style={{
+                width: "100%",
+                maxWidth: "800px",
+                height: "auto"
+              }}
+            />
+            <p style={{
+              color: "white",
+              marginTop: "1rem",
+              fontSize: "1.5rem",
+              textAlign: "center"
+            }}>
+              "찍어" 또는 "촬영"이라고 말씀해 주세요
+            </p>
+          </div>
+        )}
 
         {/* 유튜브 음악 재생 (숨김) */}
         {showYoutube && (
