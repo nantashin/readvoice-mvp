@@ -86,40 +86,30 @@ if (-not $latestTag) { $latestTag = "v0.0.0 (태그 없음)" }
 
 # ── save-state.md 읽기 ─────────────────────────────
 $saveState = ""
+$nextTasks = ""
 $currentIssues = ""
 $saveStatePath = "$ROOT\docs\handoff\save-state.md"
+
 if (Test-Path $saveStatePath) {
   $saveState = Get-Content $saveStatePath -Raw -Encoding UTF8
 
-  # "현재 이슈" 섹션만 추출
+  # "오늘 할 일" 섹션 추출 (정규식)
+  if ($saveState -match '(?s)## 오늘 할 일.*?(?=##|$)') {
+    $nextTasks = $matches[0].Trim()
+  } else {
+    $nextTasks = "- [ ] 다음 작업을 save-state.md에 기록해주세요"
+  }
+
+  # "현재 이슈" 섹션 추출 (선택적)
   if ($saveState -match '(?s)## 현재 이슈(.+?)(?=##|$)') {
     $currentIssues = $matches[1].Trim()
   } else {
-    $currentIssues = "현재 이슈 섹션을 찾을 수 없습니다."
+    $currentIssues = ""
   }
 } else {
   $saveState = "save-state.md 파일이 없습니다."
-  $currentIssues = "save-state.md 파일이 없습니다."
-}
-
-# ── TODO 파일에서 내일 할 일 읽기 ──────────────────
-$tomorrow = (Get-Date).AddDays(1).ToString("yyyy-MM-dd")
-$todoFile = "$REPORT1\$tomorrow-action-plan.md"
-$todoContent = ""
-
-if (Test-Path $todoFile) {
-  $todoContent = Get-Content $todoFile -Raw -Encoding UTF8
-} else {
-  # 내일 날짜 파일이 없으면 최근 TODO 파일 찾기
-  $todoFiles = Get-ChildItem "$REPORT1\*-action-plan.md", "$REPORT1\TODO*.md" -ErrorAction SilentlyContinue |
-               Sort-Object LastWriteTime -Descending |
-               Select-Object -First 1
-
-  if ($todoFiles) {
-    $todoContent = Get-Content $todoFiles.FullName -Raw -Encoding UTF8
-  } else {
-    $todoContent = "- [ ] 다음 작업 계획을 여기에 작성하세요"
-  }
+  $nextTasks = "- [ ] save-state.md 파일을 먼저 생성해주세요"
+  $currentIssues = ""
 }
 
 # ── roadmap-data.json 읽기 ─────────────────────────
@@ -235,15 +225,15 @@ $phase2Todo
 
 ---
 
-## 🔄 현재 이슈
+## 📅 다음 할 일
 
-$currentIssues
+$nextTasks
 
 ---
 
-## 📅 다음 할 일
+## 🔄 현재 이슈
 
-$todoContent
+$currentIssues
 
 ---
 
@@ -325,7 +315,7 @@ $changedFilesSimple
 $currentIssues
 
 📅 내일 작업 계획
-$todoContent
+$nextTasks
 
 📈 현재 작동 상태
 ✅ 음성 대화 ($statusVoice) / ✅ 이미지 분석 ($statusImage) / ✅ PDF OCR ($statusPdf) / ✅ BGM ($statusBgm) / ✅ TTS ($statusTts)
@@ -374,7 +364,7 @@ $changedFilesSimple
 $currentIssues
 
 ## 다음 작업
-$todoContent
+$nextTasks
 
 ---
 
