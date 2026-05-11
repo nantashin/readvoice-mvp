@@ -11,7 +11,7 @@ import { playMicOn, playMicOff } from "@/lib/audio/mic-sound"
 import { sessionManager } from "@/lib/session/session-manager"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select" | "loading"
 // 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
 
