@@ -89,21 +89,43 @@ export default function Home() {
     document.body.setAttribute("tabindex", "0")
     document.body.focus()
 
-    // 1초 후 안내 + 띠링 소리
-    const timer = setTimeout(() => {
+    // 첫 번째 사용자 인터랙션 시 안내 멘트 재생
+    let hasPlayed = false
+
+    const playIntro = () => {
+      if (hasPlayed) return
+      hasPlayed = true
+
+      console.log("[초기화] 첫 인터랙션 감지, 안내 멘트 재생")
       window.speechSynthesis.cancel()
       const utt = new SpeechSynthesisUtterance(INTRO_TTS)
       utt.lang = "ko-KR"
       utt.rate = 1.0
       utt.pitch = 1.7
       utt.onend = () => {
-        // TTS 끝난 후 띠링 소리
+        console.log("[TTS] 안내 멘트 끝남, 띠링 소리 재생")
         setTimeout(() => playMicOn(), 500)
       }
       window.speechSynthesis.speak(utt)
-    }, 1000)
 
-    return () => clearTimeout(timer)
+      // 이벤트 리스너 제거
+      document.removeEventListener('click', playIntro)
+      document.removeEventListener('keydown', playIntro)
+      document.removeEventListener('touchstart', playIntro)
+    }
+
+    // 모든 사용자 인터랙션 감지 (스페이스바, 터치, 클릭)
+    document.addEventListener('click', playIntro)
+    document.addEventListener('keydown', playIntro)
+    document.addEventListener('touchstart', playIntro)
+
+    console.log("[초기화] 첫 인터랙션 대기 중 (스페이스바/터치/클릭)")
+
+    return () => {
+      document.removeEventListener('click', playIntro)
+      document.removeEventListener('keydown', playIntro)
+      document.removeEventListener('touchstart', playIntro)
+    }
   }, [])
 
   useEffect(() => {
