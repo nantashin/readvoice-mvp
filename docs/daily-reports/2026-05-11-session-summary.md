@@ -1,11 +1,13 @@
 # 세션 요약 — 2026-05-11
 
 ## 작업 시간
-- **생성 시각:** 2026-05-11 18:29:20
+- **생성 시각:** 2026-05-11 18:35:17
 - **현재 버전:** v2.8.3
 - **브랜치:** master
 
 ## 오늘의 커밋 ()
+  - c1d2522: fix: MenuState loading 타입 추가, 빌드 성공
+  - f746e6d: docs: 일일 보고서 자동 생성 (2026-05-11)
   - 90542a7: fix: MenuState loading 타입 추가, 빌드 성공
   - 01844cd: docs: 2026-05-11 음성 파일 선택 시스템 완성 보고서
   - 66b79c5: feat: voice file selection with folder auto-open
@@ -33,8 +35,26 @@
   - app/page.tsx
   - docs/daily-reports/2026-05-08-session-summary.md
   - docs/daily-reports/2026-05-08.md
+  - docs/daily-reports/2026-05-11-session-summary.md
+  - docs/daily-reports/2026-05-11.md
   - docs/daily-reports/2026-05-11_voice-file-selection.md
+  - docs/daily-reports/roadmap_20260511.pptx
   - docs/handoff/save-state.md
+  - docs/roadmap-data.json
+  - docs/versions/VERSION_HISTORY.md
+  - docs/versions/v2.8.3/CLAUDE.md
+  - docs/versions/v2.8.3/app_api_ocr_route.ts
+  - docs/versions/v2.8.3/app_components_FileUpload.tsx
+  - docs/versions/v2.8.3/app_components_MicButton.tsx
+  - docs/versions/v2.8.3/app_page.tsx
+  - docs/versions/v2.8.3/lib_audio_bgm-manager.ts
+  - docs/versions/v2.8.3/lib_speech_stt.ts
+  - docs/versions/v2.8.3/modules_ocr_gemini.ts
+  - docs/versions/v2.8.3/modules_ocr_ocr-engine.ts
+  - docs/versions/v2.8.3/modules_ocr_pdf.ts
+  - docs/versions/v2.8.3/server_glm-ocr.py
+  - docs/versions/v2.8.3/server_pdf-to-image.py
+  - docs/versions/v2.8.3/version-meta.json
   - lib/audio/bgm-manager.ts
   - lib/session/session-manager.ts
   - lib/speech/stt.ts
