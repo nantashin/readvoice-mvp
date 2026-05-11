@@ -102,25 +102,24 @@ if (Test-Path $saveStatePath) {
   $currentIssues = "save-state.md 파일이 없습니다."
 }
 
-# ── next-task.md 읽기 ──────────────────────────────
-$nextTask = ""
-$nextTaskPath = "$ROOT\docs\handoff\next-task.md"
-if (Test-Path $nextTaskPath) {
-  $nextTask = Get-Content $nextTaskPath -Raw -Encoding UTF8
-} else {
-  $nextTask = "next-task.md 파일이 없습니다. 직접 작성해주세요."
-}
-
-# ── 최근 TODO 파일 찾기 ────────────────────────────
+# ── TODO 파일에서 내일 할 일 읽기 ──────────────────
+$tomorrow = (Get-Date).AddDays(1).ToString("yyyy-MM-dd")
+$todoFile = "$REPORT1\$tomorrow-action-plan.md"
 $todoContent = ""
-$todoFiles = Get-ChildItem "$REPORT1\*-action-plan.md", "$REPORT1\TODO*.md" -ErrorAction SilentlyContinue |
-             Sort-Object LastWriteTime -Descending |
-             Select-Object -First 1
 
-if ($todoFiles) {
-  $todoContent = Get-Content $todoFiles.FullName -Raw -Encoding UTF8
+if (Test-Path $todoFile) {
+  $todoContent = Get-Content $todoFile -Raw -Encoding UTF8
 } else {
-  $todoContent = "TODO 파일을 찾을 수 없습니다."
+  # 내일 날짜 파일이 없으면 최근 TODO 파일 찾기
+  $todoFiles = Get-ChildItem "$REPORT1\*-action-plan.md", "$REPORT1\TODO*.md" -ErrorAction SilentlyContinue |
+               Sort-Object LastWriteTime -Descending |
+               Select-Object -First 1
+
+  if ($todoFiles) {
+    $todoContent = Get-Content $todoFiles.FullName -Raw -Encoding UTF8
+  } else {
+    $todoContent = "- [ ] 다음 작업 계획을 여기에 작성하세요"
+  }
 }
 
 # ── roadmap-data.json 읽기 ─────────────────────────
@@ -236,9 +235,15 @@ $phase2Todo
 
 ---
 
-## ⚠️ 알려진 이슈 / 미해결 문제
+## 🔄 현재 이슈
 
-(save-state.md 의 알려진 이슈 섹션 참고)
+$currentIssues
+
+---
+
+## 📅 다음 할 일
+
+$todoContent
 
 ---
 
@@ -256,12 +261,6 @@ $ollamaText
 - **npm:** $npmVer
 - **Python:** $pythonVer
 - **Ollama:** $ollamaVer
-
----
-
-## 📝 다음 작업
-
-$nextTask
 
 ---
 
