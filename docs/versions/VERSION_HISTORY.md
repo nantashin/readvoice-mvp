@@ -170,3 +170,9 @@
 **내용:** MenuState 오류 수정, 빌드 성공
 **스냅샷:** docs/versions/v2.8.3/
 
+
+## v2.8.3 (2026-05-11_18-35)
+**Phase:** Phase 2
+**내용:** MenuState 오류 수정, 빌드 성공
+**스냅샷:** docs/versions/v2.8.3/
+
