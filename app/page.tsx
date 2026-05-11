@@ -546,41 +546,11 @@ export default function Home() {
       return
     }
 
-    // 이미지 업로드 (가장 많이 쓰는 명령)
+    // 이미지 업로드 (가장 많이 쓰는 명령) - 바로 폴더 열기
     if (/이미지|사진|그림|화면|스크린/.test(t) &&
         /업로드|분석|읽어|열어|올려|봐줘|해줘|시작/.test(t)) {
-      // 소스 선택 안내
-      setMenuState("choose_source")
-      speak("화면을 읽어드릴까요? 가지고 계신 사진이나 서류가 있으신가요?", speechRate, 1.7, () => {
-        playMicOn()
-        setTimeout(() => {
-          stt.startListening()
-          setMicState("listening")
-        }, 200)
-      })
-      return
-    }
-
-    // ── 소스 선택 모드 처리 ──────────────
-    if (menuStateRef.current === "choose_source") {
-      // 화면 캡처 / 현재 페이지
-      if (/화면|스크린|페이지|웹|여기|이거/.test(t)) {
-        speak("현재 화면을 분석할게요. 잠시만 기다려 주세요.", speechRate, 1.7, () => {
-          captureScreen()
-        })
-        return
-      }
-
-      // 카메라 촬영
-      if (/촬영|사진찍|카메라|찍어|새로/.test(t)) {
-        startCamera()
-        return
-      }
-
-      // 폴더에서 선택
-      if (/폴더|파일|있어|가지고|선택/.test(t)) {
-        // 폴더 파일 목록 가져오기
-        speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
+      // 바로 폴더 파일 목록 가져오기
+      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
         try {
           const res = await fetch("/api/watch-folder")
           const data = await res.json()
@@ -628,8 +598,6 @@ export default function Home() {
         }
       })
       return
-      }
-      return
     }
 
     // ── 카메라 촬영 모드 처리 ──────────────
@@ -658,11 +626,54 @@ export default function Home() {
       return
     }
 
-    // 문서 업로드
+    // 문서 업로드 - 이미지와 동일하게 폴더 열기
     if (/pdf|문서|파일|서류/.test(t) &&
-        /업로드|분석|읽어|열어|올려|해줘|시작/.test(t)) {
-      speak("문서를 올려주세요.", speechRate, 1.7, () => {
-        setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+        /업로드|분석|읽어|열어|올려|해줘|시작|있어/.test(t)) {
+      // 바로 폴더 파일 목록 가져오기
+      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
+        try {
+          const res = await fetch("/api/watch-folder")
+          const data = await res.json()
+          const files = data.files || []
+
+          if (files.length === 0) {
+            speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
+            return
+          }
+
+          setUploadFiles(files)
+          setMenuState("file_list")
+
+          // 파일 목록 읽어주기
+          const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
+            `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+          ).join(". ")
+
+          const message = files.length > 5
+            ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
+            : `${fileList}. 파일 이름을 말씀해 주세요.`
+
+          speak(message, speechRate, 1.7, () => {
+            setMenuState("file_select")
+            playMicOn()
+            setTimeout(() => {
+              stt.startListening()
+              setMicState("listening")
+            }, 200)
+
+            // 3초 무응답 시 추천
+            setTimeout(() => {
+              if (menuStateRef.current === "file_select") {
+                speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
+                  loadFileByName(files[0].name)
+                })
+              }
+            }, 3000)
+          })
+        } catch (e) {
+          console.error("[파일 목록] 에러:", e)
+          speak("폴더를 열 수 없어요.", speechRate)
+        }
       })
       return
     }
