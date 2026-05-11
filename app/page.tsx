@@ -10,7 +10,7 @@ import { bgmManager } from "@/lib/audio/bgm-manager"
 import { playMicOn, playMicOff } from "@/lib/audio/mic-sound"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select" | "choose_source" | "camera_capture" | "camera_title"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select"
 // 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
 
