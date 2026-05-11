@@ -91,14 +91,19 @@ export default function Home() {
 
     // 1초 후 안내 + 띠링 소리
     const timer = setTimeout(() => {
-      speak(INTRO_TTS, 1.0, 1.7, () => {
+      window.speechSynthesis.cancel()
+      const utt = new SpeechSynthesisUtterance(INTRO_TTS)
+      utt.lang = "ko-KR"
+      utt.rate = 1.0
+      utt.pitch = 1.7
+      utt.onend = () => {
         // TTS 끝난 후 띠링 소리
         setTimeout(() => playMicOn(), 500)
-      })
+      }
+      window.speechSynthesis.speak(utt)
     }, 1000)
 
     return () => clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
