@@ -14,6 +14,8 @@ class BGMManager {
   private duckVolume = 0.08
   private announcementRate = 1.0
   private announcementEnabled = true
+  private youtubeAudio: HTMLAudioElement | null = null
+  private isYoutubeMode = false
 
   /**
    * 최초 1회만 초기화 (이후 일시정지/재개)
@@ -123,11 +125,32 @@ class BGMManager {
   }
 
   /**
+   * 유튜브 음악 재생
+   */
+  playYoutube(url: string): void {
+    console.log("[BGM] 유튜브 재생:", url)
+    // 기존 BGM 일시정지
+    this.pause()
+    this.isYoutubeMode = true
+
+    // 유튜브는 embed로 재생 (iframe)
+    const event = new CustomEvent("playYoutube", { detail: { url } })
+    window.dispatchEvent(event)
+  }
+
+  /**
    * 분석 중 안내 멘트 재생 (announcementEnabled가 true일 때만)
    */
   announceProgress(): void {
     if (!this.announcementEnabled) return
-    // 기존 코드 유지 (현재는 없음, 나중에 구현 예정)
+    // BGM 볼륨 낮추기
+    this.duck()
+    // 안내 멘트
+    const utt = new SpeechSynthesisUtterance("잠시만요, 아직 분석 중이에요.")
+    utt.lang = "ko-KR"
+    utt.rate = this.announcementRate
+    utt.onend = () => this.unduck()
+    window.speechSynthesis.speak(utt)
   }
 }
 

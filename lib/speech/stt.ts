@@ -18,21 +18,54 @@ export function useSpeechRecognition() {
     if (!SR) { setState(s => ({ ...s, error: "이 브라우저는 음성 인식을 지원하지 않습니다." })); return }
     const r = new SR()
     r.lang = "ko-KR"
-    r.continuous = false  // 한 문장만 듣고 자동 종료
-    r.interimResults = false  // 중간 결과 없음 (최종 결과만)
+    r.continuous = true  // 계속 듣기 모드
+    r.interimResults = true  // 중간 결과도 받기
+
+    // 침묵 감지 타이머
+    let silenceTimer: NodeJS.Timeout | null = null
+    let maxTimer: NodeJS.Timeout | null = null
+    let hasSpoken = false
+    const MAX_DURATION = 30000  // 최대 30초
+    const SILENCE_THRESHOLD = 3000  // 3초 침묵 감지
+
+    r.onstart = () => {
+      hasSpoken = false
+      // 최대 시간 타이머
+      maxTimer = setTimeout(() => {
+        r.stop()
+        setState(s => ({ ...s, isListening: false }))
+        playMicOff()
+      }, MAX_DURATION)
+    }
+
     r.onresult = (e: SpeechRecognitionEvent) => {
+      hasSpoken = true
       const t = Array.from(e.results).map(r => r[0].transcript).join("")
       setState(s => ({ ...s, transcript: t }))
 
-      // 결과 받으면 자동으로 마이크 끄기
-      r.stop()
-      setState(s => ({ ...s, isListening: false }))
-
-      // 마이크 OFF 효과음 재생
-      playMicOff()
+      // 침묵 타이머 리셋
+      if (silenceTimer) clearTimeout(silenceTimer)
+      silenceTimer = setTimeout(() => {
+        // 3초 침묵 → 자동 종료
+        r.stop()
+        if (maxTimer) clearTimeout(maxTimer)
+        setState(s => ({ ...s, isListening: false }))
+        playMicOff()
+      }, SILENCE_THRESHOLD)
     }
-    r.onend = () => setState(s => ({ ...s, isListening: false }))
-    r.onerror = (e: SpeechRecognitionErrorEvent) => setState(s => ({ ...s, error: e.error, isListening: false }))
+
+    r.onend = () => {
+      if (maxTimer) clearTimeout(maxTimer)
+      if (silenceTimer) clearTimeout(silenceTimer)
+      setState(s => ({ ...s, isListening: false }))
+    }
+
+    r.onerror = (e: SpeechRecognitionErrorEvent) => {
+      if (maxTimer) clearTimeout(maxTimer)
+      if (silenceTimer) clearTimeout(silenceTimer)
+      setState(s => ({ ...s, error: e.error, isListening: false }))
+    }
+
     recogRef.current = r
   }, [])
 

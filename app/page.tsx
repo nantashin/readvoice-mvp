@@ -10,14 +10,11 @@ import { bgmManager } from "@/lib/audio/bgm-manager"
 import { playMicOn, playMicOff } from "@/lib/audio/mic-sound"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select"
 // 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
 
-const INTRO_TTS = `안녕하세요! READ VOICE Pro예요.
-스페이스바를 누르고 말씀해 주시면 바로 도와드릴게요.
-말씀이 끝나시면 스페이스바를 다시 눌러 주세요.
-스페이스바를 빠르게 두 번 누르시면 처음으로 돌아가요.`
+const INTRO_TTS = `안녕하세요! AI 음성 도우미예요. 띠링 소리가 나면 말씀해 주세요.`
 
 const MAIN_MENU_TTS = `어떻게 도와드릴까요?
 일번. 무언가 검색해 드릴게요.
@@ -63,6 +60,9 @@ export default function Home() {
   const [lastResponse, setLastResponse] = useState<string>("")
   const [previousMenuState, setPreviousMenuState] = useState<MenuState>("idle")
   const [fileType, setFileType] = useState<FileType>(null)
+  const [youtubeResults, setYoutubeResults] = useState<{title:string,url:string}[]>([])
+  const [youtubeUrl, setYoutubeUrl] = useState("")
+  const [showYoutube, setShowYoutube] = useState(false)
 
   const micStateRef = useRef<MicState>("off")
   const menuStateRef = useRef<MenuState>("idle")
@@ -89,17 +89,16 @@ export default function Home() {
     document.body.setAttribute("tabindex", "0")
     document.body.focus()
 
-    // 1초 후 안내
+    // 1초 후 안내 + 띠링 소리
     const timer = setTimeout(() => {
-      window.speechSynthesis.cancel()
-      const utt = new SpeechSynthesisUtterance(INTRO_TTS)
-      utt.lang = "ko-KR"
-      utt.rate = 1.0  // 또박또박 친절하게
-      utt.pitch = 1.8  // 밝고 따뜻한 홈쇼핑 안내원 톤
-      window.speechSynthesis.speak(utt)
+      speak(INTRO_TTS, 1.0, 1.7, () => {
+        // TTS 끝난 후 띠링 소리
+        setTimeout(() => playMicOn(), 500)
+      })
     }, 1000)
 
     return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -232,23 +231,48 @@ export default function Home() {
     return () => window.removeEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
   }, [startListening])
 
+  // 유튜브 재생 이벤트 처리
+  useEffect(() => {
+    const handleYoutube = (e: CustomEvent) => {
+      setYoutubeUrl(e.detail.url)
+      setShowYoutube(true)
+    }
+    window.addEventListener("playYoutube", handleYoutube as EventListener)
+    return () => window.removeEventListener("playYoutube", handleYoutube as EventListener)
+  }, [])
+
+  // 모델 선택 10초 무응답 시 안내
+  useEffect(() => {
+    if (menuState !== "model_select") return
+
+    const timer = setTimeout(() => {
+      if (menuStateRef.current === "model_select") {
+        speak("어떤 모델로 해드릴까요? 잘 모르시겠으면 '추천해줘'라고 말씀해 주세요.", speechRate)
+      }
+    }, 10000)
+
+    return () => clearTimeout(timer)
+  }, [menuState, speak, speechRate])
+
   // 싱글탭: 현재 동작 중지 + 마이크 ON
   const handleSingleSpace = useCallback(() => {
-    console.log("[handleSingleSpace] TTS/BGM 중지")
     window.speechSynthesis.cancel()
-    bgmManager.pause()
 
-    if (stt.isListening) {
+    if (micStateRef.current === "listening") {
       // 마이크 ON 상태 → 마이크 끄고 STT 결과 처리
-      console.log("[마이크] 완료")
-      stopListening()
+      stt.stopListening()
+      setMicState("off")
+      playMicOff()
       return
     }
 
-    // 마이크 OFF 상태 → 마이크 켜기
-    console.log("[마이크] 시작")
-    startListening()
-  }, [stt.isListening, startListening, stopListening])
+    // 안내멘트 없이 띠링 후 즉시 마이크 ON
+    playMicOn()
+    setTimeout(() => {
+      stt.startListening()
+      setMicState("listening")
+    }, 200)
+  }, [stt])
 
   // 더블탭: 처음 메뉴로
   const handleDoubleSpace = useCallback(() => {
@@ -325,7 +349,78 @@ export default function Home() {
     const t = transcript.replace(/\s/g, "").toLowerCase()
     console.log("[음성] 입력:", transcript)
 
+    // ── 침묵 처리 (너무 짧거나 비어있음) ──────────────
+    if (!transcript || transcript.trim().length < 2) {
+      speak("이대로 진행할까요? 아니면 말씀해 주세요.", speechRate)
+      return
+    }
+
+    // ── 유튜브 검색 모드 처리 ──────────────
+    if (menuStateRef.current === "youtube_search") {
+      const searchQuery = transcript
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: `유튜브에서 "${searchQuery}" 검색 결과 음악 3개를 JSON으로 답해줘.
+형식: [{"title":"곡 제목","url":"https://www.youtube.com/watch?v=..."}]
+실제 존재하는 유튜브 URL만 답해줘. JSON만 답해.`,
+            model: "exaone3.5:2.4b"
+          })
+        })
+        const data = await res.json()
+        const text = data.response || data.message || "[]"
+        const results = JSON.parse(text.match(/\[[\s\S]*\]/)?.[0] || "[]")
+        setYoutubeResults(results)
+
+        const resultText = results.map((r: {title: string}, i: number) =>
+          `${i+1}번. ${r.title}`
+        ).join(". ")
+        speak(`${resultText}. 몇 번을 틀어드릴까요?`, speechRate)
+        setMenuState("youtube_select")
+      } catch {
+        const fallback = [
+          { title: "잔잔한 피아노 음악", url: "https://www.youtube.com/watch?v=4oStw0r33so" },
+          { title: "집중력 향상 음악", url: "https://www.youtube.com/watch?v=kH8fJHV2fIQ" },
+          { title: "자연 소리 음악", url: "https://www.youtube.com/watch?v=lTRiuFIWV54" }
+        ]
+        setYoutubeResults(fallback)
+        speak("일번. 잔잔한 피아노 음악. 이번. 집중력 향상 음악. 삼번. 자연 소리 음악. 몇 번을 틀어드릴까요?", speechRate)
+        setMenuState("youtube_select")
+      }
+      return
+    }
+
+    // ── 유튜브 선택 모드 처리 ──────────────
+    if (menuStateRef.current === "youtube_select") {
+      const num = /일번|1번|1/.test(t) ? 0 : /이번|2번|2/.test(t) ? 1 : /삼번|3번|3/.test(t) ? 2 : -1
+      if (num >= 0 && youtubeResults[num]) {
+        bgmManager.playYoutube(youtubeResults[num].url)
+        speak(`${youtubeResults[num].title} 틀어드릴게요.`, speechRate)
+        setMenuState("idle")
+      } else {
+        speak("다시 말씀해 주세요. 일번, 이번, 또는 삼번이에요.", speechRate)
+      }
+      return
+    }
+
     // ── 즉시 처리 키워드 (LLM 불필요) ──────────────
+
+    // 추천해줘
+    if (/추천|추천해|추천해줘|골라줘|알아서/.test(t)) {
+      setSelectedModel("gemma4:e4b")
+      speak("구글 4기가로 분석해 드릴게요.", speechRate, 1.7, () => {
+        if (pendingFile) {
+          executeAnalysis(pendingFile, "gemma4:e4b")
+        } else {
+          speak("이미지를 올려주세요.", speechRate, 1.7, () => {
+            setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+          })
+        }
+      })
+      return
+    }
 
     // 속도
     if (/천천히|느리게|빠르잖아|못알아|빠르다|빨라/.test(t)) {
@@ -385,6 +480,18 @@ export default function Home() {
     // 음악
     if (/음악꺼|bgm꺼|노래꺼/.test(t)) { bgmManager.pause(); speak("음악을 껐어요.", speechRate); return }
     if (/음악켜|bgm켜|노래켜/.test(t)) { bgmManager.start(speechRate); speak("음악을 켰어요.", speechRate); return }
+
+    // 유튜브 음악 검색
+    if (/유튜브|유튜브음악|다른음악|음악바꿔|다른노래/.test(t)) {
+      speak("어떤 음악 틀어드릴까요? 말씀해 주세요.", speechRate, 1.7, () => {
+        setTimeout(() => {
+          setMenuState("youtube_search")
+          playMicOn()
+          setTimeout(() => stt.startListening(), 200)
+        }, 300)
+      })
+      return
+    }
 
     // 처음으로
     if (/처음으로|처음부터|메인으로|다시처음/.test(t)) {
@@ -738,13 +845,33 @@ export default function Home() {
             }}
             onFileSelected={(file) => {
               setPendingFile(file)
-              const fullMessage = "파일이 선택됐어요. " + MODEL_MENU_TTS
-              speak(fullMessage)
-              setMenuState("model_select")
-              setMicState("off")
+              // 따뜻한 안내
+              speak("이미지 인식되었습니다. 어떤 모델로 읽어드릴까요?", speechRate, 1.7, () => {
+                // 2초 후 모델 선택 안내
+                setTimeout(() => {
+                  speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
+                    setMenuState("model_select")
+                    playMicOn()
+                    setTimeout(() => {
+                      stt.startListening()
+                      setMicState("listening")
+                    }, 200)
+                  })
+                }, 2000)
+              })
             }}
           />
         </div>
+
+        {/* 유튜브 음악 재생 (숨김) */}
+        {showYoutube && (
+          <iframe
+            src={youtubeUrl.replace("watch?v=", "embed/") + "?autoplay=1"}
+            style={{ display: "none" }}
+            allow="autoplay"
+            title="YouTube Music Player"
+          />
+        )}
 
         <p
           style={{
