@@ -50,7 +50,8 @@
       "Bash(cp app/api/ocr/route.ts docs/versions/v2.8.0/app_api_ocr_route.ts)",
       "Bash(cp modules/ocr/gemini.ts docs/versions/v2.8.0/modules_ocr_gemini.ts)",
       "Bash(pwsh:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(tasklist //FI \"PID eq 65960\")"
     ]
   }
 }

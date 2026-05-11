@@ -10,9 +10,15 @@ import { bgmManager } from "@/lib/audio/bgm-manager"
 import { playMicOn, playMicOff } from "@/lib/audio/mic-sound"
 
 type MicState = "off" | "listening" | "processing" | "speaking"
-type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select"
+type MenuState = "idle" | "main_menu" | "model_select" | "confirm" | "ocr" | "image" | "youtube_search" | "youtube_select" | "file_list" | "file_select"
 // 다국어 지원 예정: "language_select" 추가 가능
 type FileType = "image" | "document" | null
+
+interface UploadFile {
+  name: string
+  path: string
+  modified: Date
+}
 
 const INTRO_TTS = `안녕하세요! AI 음성 도우미예요. 띠링 소리가 나면 말씀해 주세요.`
 
@@ -63,6 +69,8 @@ export default function Home() {
   const [youtubeResults, setYoutubeResults] = useState<{title:string,url:string}[]>([])
   const [youtubeUrl, setYoutubeUrl] = useState("")
   const [showYoutube, setShowYoutube] = useState(false)
+  const [uploadFiles, setUploadFiles] = useState<UploadFile[]>([])
+  const [selectedFileName, setSelectedFileName] = useState<string>("")
 
   const micStateRef = useRef<MicState>("off")
   const menuStateRef = useRef<MenuState>("idle")
@@ -364,6 +372,48 @@ export default function Home() {
     }
   }, [stt.isListening, stt.transcript])
 
+  // 파일명으로 파일 로드
+  const loadFileByName = async (fileName: string) => {
+    try {
+      speak(`${fileName.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}를 선택했어요. 파일을 읽고 있어요.`, speechRate, 1.7, async () => {
+        const res = await fetch(`/api/read-file?file=${encodeURIComponent(fileName)}`)
+        const data = await res.json()
+
+        if (data.error) {
+          speak("파일을 읽을 수 없어요. 다시 시도해 주세요.", speechRate)
+          return
+        }
+
+        // Base64 → Blob → File
+        const base64Data = data.base64
+        const byteCharacters = atob(base64Data)
+        const byteNumbers = new Array(byteCharacters.length)
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i)
+        }
+        const byteArray = new Uint8Array(byteNumbers)
+        const blob = new Blob([byteArray], { type: data.mimeType })
+        const file = new File([blob], fileName, { type: data.mimeType })
+
+        setPendingFile(file)
+        setSelectedFileName(fileName)
+        setMenuState("model_select")
+
+        // 모델 선택 안내
+        speak(MODEL_MENU_TTS, speechRate, 1.7, () => {
+          playMicOn()
+          setTimeout(() => {
+            stt.startListening()
+            setMicState("listening")
+          }, 200)
+        })
+      })
+    } catch (e) {
+      console.error("[loadFileByName] 에러:", e)
+      speak("파일을 읽는 중 오류가 발생했어요.", speechRate)
+    }
+  }
+
   // 파일 분석 실행 헬퍼 함수
   const executeAnalysis = useCallback((file: File, modelId: string) => {
     console.log("[executeAnalysis] 파일:", file.name, "모델:", modelId)
@@ -432,6 +482,36 @@ export default function Home() {
       return
     }
 
+    // ── 파일 선택 모드 처리 ──────────────
+    if (menuStateRef.current === "file_select") {
+      // 번호로 선택
+      const numMatch = transcript.match(/일번|1번|이번|2번|삼번|3번|사번|4번|오번|5번/)
+      if (numMatch) {
+        const numMap: Record<string, number> = {
+          "일번": 0, "1번": 0, "이번": 1, "2번": 1, "삼번": 2, "3번": 2,
+          "사번": 3, "4번": 3, "오번": 4, "5번": 4
+        }
+        const num = numMap[numMatch[0]]
+        if (uploadFiles[num]) {
+          loadFileByName(uploadFiles[num].name)
+          return
+        }
+      }
+
+      // 파일명으로 선택 (부분 매칭)
+      const matchedFile = uploadFiles.find(f =>
+        f.name.toLowerCase().includes(transcript.toLowerCase()) ||
+        transcript.toLowerCase().includes(f.name.toLowerCase().replace(/\.(jpg|jpeg|png|webp|pdf)$/i, ''))
+      )
+
+      if (matchedFile) {
+        loadFileByName(matchedFile.name)
+      } else {
+        speak("파일을 찾을 수 없어요. 다시 말씀해 주세요.", speechRate)
+      }
+      return
+    }
+
     // ── 즉시 처리 키워드 (LLM 불필요) ──────────────
 
     // 추천해줘
@@ -466,8 +546,53 @@ export default function Home() {
     // 이미지 업로드 (가장 많이 쓰는 명령)
     if (/이미지|사진|그림|화면|스크린/.test(t) &&
         /업로드|분석|읽어|열어|올려|봐줘|해줘|시작/.test(t)) {
-      speak("이미지를 올려주세요.", speechRate, 1.7, () => {
-        setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+      // 폴더 파일 목록 가져오기
+      speak("업로드 폴더를 확인하고 있어요.", speechRate, 1.7, async () => {
+        try {
+          const res = await fetch("/api/watch-folder")
+          const data = await res.json()
+          const files = data.files || []
+
+          if (files.length === 0) {
+            speak("폴더에 파일이 없어요. 파일을 폴더에 넣어주세요.", speechRate)
+            return
+          }
+
+          setUploadFiles(files)
+          setMenuState("file_list")
+
+          // 파일 목록 읽어주기
+          const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
+            `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+          ).join(". ")
+
+          const message = files.length > 5
+            ? `${fileList}. 총 ${files.length}개 파일이 있어요. 파일 이름을 말씀해 주세요.`
+            : `${fileList}. 파일 이름을 말씀해 주세요.`
+
+          speak(message, speechRate, 1.7, () => {
+            setMenuState("file_select")
+            playMicOn()
+            setTimeout(() => {
+              stt.startListening()
+              setMicState("listening")
+            }, 200)
+
+            // 3초 무응답 시 추천
+            setTimeout(() => {
+              if (menuStateRef.current === "file_select") {
+                speak("추천해드릴까요? 가장 최근 파일로 분석할게요.", speechRate, 1.7, () => {
+                  loadFileByName(files[0].name)
+                })
+              }
+            }, 3000)
+          })
+        } catch (e) {
+          console.error("[파일 목록] 에러:", e)
+          speak("폴더를 열 수 없어요. 파일 선택 창을 열게요.", speechRate, 1.7, () => {
+            setTimeout(() => document.querySelector<HTMLInputElement>('input[type="file"]')?.click(), 300)
+          })
+        }
       })
       return
     }
