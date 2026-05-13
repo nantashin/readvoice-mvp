@@ -13,17 +13,28 @@ export async function GET(req: NextRequest) {
       return Response.json({ error: "파일명이 필요합니다" }, { status: 400 })
     }
 
-    const filePath = path.resolve(UPLOAD_FOLDER, fileName)
     const uploadFolderResolved = path.resolve(UPLOAD_FOLDER)
+    const filePath = path.resolve(uploadFolderResolved, fileName)
+    const relativePath = path.relative(uploadFolderResolved, filePath)
 
-    // 보안: 경로 이탈 방지
-    if (!filePath.startsWith(uploadFolderResolved)) {
-      console.error("[read-file] 경로 이탈 감지:", { filePath, uploadFolderResolved })
+    // 보안: 경로 이탈 방지 (상위 디렉토리 접근 차단)
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+      console.error("[read-file] 경로 이탈 감지:", { filePath, uploadFolderResolved, relativePath })
       return Response.json({ error: "잘못된 파일 경로" }, { status: 403 })
     }
 
     if (!fs.existsSync(filePath)) {
       return Response.json({ error: "파일을 찾을 수 없습니다" }, { status: 404 })
+    }
+
+    // 보안: 파일 크기 제한 (10MB)
+    const stats = fs.statSync(filePath)
+    const sizeInMB = stats.size / (1024 * 1024)
+    if (sizeInMB > 10) {
+      return Response.json({
+        error: "파일 크기가 너무 큽니다 (최대 10MB)",
+        size: `${sizeInMB.toFixed(2)}MB`
+      }, { status: 413 })
     }
 
     const fileBuffer = fs.readFileSync(filePath)

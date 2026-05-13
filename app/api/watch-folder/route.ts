@@ -19,11 +19,18 @@ export async function GET() {
         const fullPath = path.join(UPLOAD_FOLDER, f)
         return fs.statSync(fullPath).isFile()
       })
-      .map(f => ({
-        name: f,
-        path: path.join(UPLOAD_FOLDER, f),
-        modified: fs.statSync(path.join(UPLOAD_FOLDER, f)).mtime
-      }))
+      .map(f => {
+        const fullPath = path.join(UPLOAD_FOLDER, f)
+        const stats = fs.statSync(fullPath)
+        const sizeInMB = stats.size / (1024 * 1024)
+
+        return {
+          name: f,
+          size: stats.size,
+          modified: stats.mtime
+        }
+      })
+      .filter(f => f.size / (1024 * 1024) <= 10)  // 10MB 제한
       .sort((a, b) => b.modified.getTime() - a.modified.getTime())
 
     return Response.json({ files, folder: UPLOAD_FOLDER })
