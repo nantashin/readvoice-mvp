@@ -52,6 +52,28 @@
 
 ## 다음에 할 일 (Phase 3)
 
+### [우선순위 0] Phase 3 첫 작업 - 모델 정리 🧹
+**배경:** 납품 계약 대비 + 품질 개선 + 중국산 모델 제외
+
+**작업 순서:**
+1. **GLM-OCR 삭제** (품질 불량 + 중국산)
+2. **SOLAR:10.7b 설치** (한국산 Upstage, Apache 2.0)
+3. **EXAONE → Qwen3.5:3b 교체** (번역/대화 모델)
+4. **4개 모델 비교 테스트**
+   - qwen3.5:3b (번역/대화)
+   - solar:10.7b (Vision 대안)
+   - gemma4:e4b (Google Vision)
+   - llama3.2-vision (Meta Vision)
+5. **테스트 결과 기반 모델 확정**
+   - 납품용 모델 선정 (solar + claude API)
+   - 일반용 모델 선정 (qwen + gemma + llama)
+
+**납품 제약사항:**
+- ❌ 납품 제외: qwen(중국), glm(중국)
+- ✅ 납품 허용: solar(한국), claude API(미국), gemma(Google), llama(Meta)
+- 📄 라이선스: Apache 2.0 모델만 납품 계약서 명시
+- 📦 납품 버전: 모델 다운로드 포함 패키지 제공
+
 ### [우선순위 1] 실제 이미지 테스트 🔬
 - **영수증** 이미지로 금액/날짜 추출 테스트
 - **명함** 이미지로 이름/연락처 추출 테스트
