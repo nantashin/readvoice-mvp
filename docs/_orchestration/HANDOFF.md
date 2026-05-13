@@ -50,23 +50,60 @@
 
 ---
 
-## 다음에 할 일 (Phase 3)
+## 내일 할 일 (2026-05-14 목요일)
 
-### [우선순위 0] Phase 3 첫 작업 - 모델 정리 🧹
-**배경:** 납품 계약 대비 + 품질 개선 + 중국산 모델 제외
+### [우선순위 0] GLM-OCR 삭제 🗑️
+**배경:** 품질 불량 + 중국산 + 납품 불가
 
 **작업 순서:**
-1. **GLM-OCR 삭제** (품질 불량 + 중국산)
-2. **SOLAR:10.7b 설치** (한국산 Upstage, Apache 2.0)
-3. **EXAONE → Qwen3.5:3b 교체** (번역/대화 모델)
-4. **4개 모델 비교 테스트**
-   - qwen3.5:3b (번역/대화)
-   - solar:10.7b (Vision 대안)
-   - gemma4:e4b (Google Vision)
-   - llama3.2-vision (Meta Vision)
-5. **테스트 결과 기반 모델 확정**
-   - 납품용 모델 선정 (solar + claude API)
-   - 일반용 모델 선정 (qwen + gemma + llama)
+1. **Ollama 모델 삭제**
+   ```bash
+   ollama rm glm-ocr
+   ```
+2. **코드 제거 (3개 파일)**
+   - `modules/ocr/gemini.ts`: GLM 모델 정의 및 프롬프트 제거
+   - `app/page.tsx`: "지엘엠" 음성 선택 옵션 제거
+   - `CLAUDE.md`: GLM 관련 문서 제거
+3. **빌드 테스트**
+   ```bash
+   npm run build
+   ```
+
+### [우선순위 1] SOLAR:10.7b 설치 및 테스트 🇰🇷
+**배경:** 한국산 모델 (Upstage), Apache 2.0 라이선스, 납품 가능
+
+**작업 순서:**
+1. **Ollama 모델 설치**
+   ```bash
+   ollama pull solar:10.7b
+   ```
+2. **코드 추가**
+   - `modules/ocr/gemini.ts`: SOLAR 모델 정의 추가
+   - `app/page.tsx`: "솔라" 음성 선택 옵션 추가
+3. **테스트 이미지로 품질 검증**
+   - 문서 OCR 테스트
+   - 이미지 설명 테스트
+   - 응답 속도 측정
+
+### [우선순위 2] EXAONE → Qwen3.5:3b 교체
+**배경:** EXAONE 번역 품질 개선 필요
+
+**작업 순서:**
+1. **Ollama 모델 설치**
+   ```bash
+   ollama pull qwen3.5:3b
+   ```
+2. **lib/llm/index.ts 수정**
+   - EXAONE 대신 qwen3.5:3b 사용
+3. **번역 품질 테스트**
+
+### [우선순위 3] 4개 모델 비교 테스트
+- qwen3.5:3b (번역/대화)
+- solar:10.7b (한국산 Vision)
+- gemma4:e4b (Google Vision)
+- llama3.2-vision (Meta Vision)
+
+### [우선순위 4] 납품용/일반용 모델 확정
 
 **납품 제약사항:**
 - ❌ 납품 제외: qwen(중국), glm(중국)
@@ -104,13 +141,13 @@
 
 ---
 
-## 다음 세션에 알려줄 것
+## 내일 아침(2026-05-14)에 알려줄 것
 
 1. **v2.9.0 완성 🎉:** Phase 2 완전 완성 (음성명령/보안/이미지8종/UX개선/인프라)
 2. **일일 보고서 자동화 완성:** daily-report.ps1 안정화 (PS5.1 호환, PPTX 자동 생성)
-3. **Phase 3 시작 준비:** 웹 검색 기능 (YouTube, Google) 설계부터 시작
-4. **실제 테스트 권장:** 영수증/명함/차트/약봉투/QR 이미지로 8종 프롬프트 검증
-5. **저녁 마무리 루틴:** version-save → daily-report → push (DAILY_ROUTINE.md 참고)
+3. **Phase 3 첫 작업:** GLM-OCR 삭제 → SOLAR 설치 → EXAONE 교체 → 모델 비교 테스트
+4. **납품 준비:** 중국산 모델(qwen, glm) 제외, Apache 2.0 라이선스만 계약서 명시
+5. **내일 최우선 작업:** ollama rm glm-ocr 후 코드 3곳 제거 (gemini.ts, page.tsx, CLAUDE.md)
 
 ---
 

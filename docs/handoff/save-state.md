@@ -50,26 +50,39 @@ c98e57e - feat: CI 추가 + orchestration 폴더 + Codex 리뷰 + IYE:V2V 전환
 - **DAILY_ROUTINE.md:** 아침/저녁 루틴 표준화 (작성 예정)
 - **save-state.md:** 다음 세션 시작 메시지 업데이트
 
-## 다음 주 할 일 (5월 19일 월요일부터)
+## 내일 할 일 (2026-05-14 목요일)
 
-### [P1] Phase 3 웹 검색 기능 설계
-- [ ] Google Search API vs Serper API 비교 및 선택
-- [ ] YouTube 검색 API 연동 방안 설계
-- [ ] "유튜브에서 ○○ 찾아줘" 음성 명령 파이프라인 설계
-- [ ] 검색 결과 TTS 요약 전략 수립 (긴 텍스트 → 핵심 요약)
+### [P0] GLM-OCR 삭제 🗑️
+- [ ] `ollama rm glm-ocr` 실행
+- [ ] `modules/ocr/gemini.ts` - GLM 모델 정의 및 프롬프트 제거
+- [ ] `app/page.tsx` - "지엘엠" 음성 선택 옵션 제거
+- [ ] `CLAUDE.md` - GLM 관련 문서 제거
+- [ ] `npm run build` 테스트
 
-### [P2] 실제 이미지 테스트 (선택 사항)
-- [ ] 영수증 이미지로 금액/날짜 추출 테스트
-- [ ] 명함 이미지로 이름/연락처 추출 테스트
-- [ ] 차트 이미지로 수치 설명 테스트
-- [ ] 약봉투 이미지로 복용법 우선 읽기 테스트
-- [ ] QR코드 이미지로 URL 추출 테스트
+### [P1] SOLAR:10.7b 설치 및 테스트 🇰🇷
+- [ ] `ollama pull solar:10.7b` 실행
+- [ ] `modules/ocr/gemini.ts` - SOLAR 모델 정의 추가
+- [ ] `app/page.tsx` - "솔라" 음성 선택 옵션 추가
+- [ ] 문서 OCR 테스트
+- [ ] 이미지 설명 테스트
+- [ ] 응답 속도 측정
 
-### [P3] Phase 3 구현 시작
-- [ ] 웹 검색 API 연동 (선택된 API 기준)
-- [ ] 검색 결과 파싱 및 요약 로직
-- [ ] 음성 명령 확장 (search 모드 추가)
-- [ ] TTS 읽기 최적화 (긴 텍스트 요약)
+### [P2] EXAONE → Qwen3.5:3b 교체
+- [ ] `ollama pull qwen3.5:3b` 실행
+- [ ] `lib/llm/index.ts` - EXAONE 대신 qwen3.5:3b 사용
+- [ ] 번역 품질 테스트
+
+### [P3] 4개 모델 비교 테스트
+- [ ] qwen3.5:3b (번역/대화)
+- [ ] solar:10.7b (한국산 Vision)
+- [ ] gemma4:e4b (Google Vision)
+- [ ] llama3.2-vision (Meta Vision)
+
+### [P4] 납품용/일반용 모델 확정
+- [ ] 테스트 결과 정리
+- [ ] 납품용 모델 선정 (solar + claude API)
+- [ ] 일반용 모델 선정
+- [ ] 계약서 라이선스 조항 초안
 
 ## 알려진 이슈
 
@@ -91,7 +104,7 @@ https://github.com/nantashin/readvoice-mvp
 - `scripts/daily-report.ps1`: Phase 상태, PS5.1 호환, PPTX 생성
 - `scripts/generate-roadmap.js`: 로드맵 PPTX 생성 (변경 없음)
 - `docs/_orchestration/HANDOFF.md`: Phase 2 완성 내역
-- `docs/handoff/save-state.md`: 이 파일 (다음 주 시작 메시지)
+- `docs/handoff/save-state.md`: 이 파일 (내일 시작 메시지)
 
 ## 참고 문서
 - 오늘 보고서: `docs/daily-reports/2026-05-13.md`
@@ -101,20 +114,25 @@ https://github.com/nantashin/readvoice-mvp
 
 ---
 
-## 📋 다음 주 월요일 시작 메시지 (복사용)
+## 📋 내일 아침(2026-05-14) 시작 메시지 (복사용)
 
 ```
-안녕! 다음 주 시작이야.
+안녕! 내일 시작이야.
 
-docs/_orchestration/HANDOFF.md 읽고 오늘 P1 계획만 먼저 보여줘.
+docs/_orchestration/HANDOFF.md 읽고 오늘 P0 계획만 먼저 보여줘.
 
 Phase 2 (v2.9.0) 완성됐어:
 - 음성명령/보안/이미지8종/UX개선/인프라 모두 완료
 - 일일 보고서 자동화도 안정화 완료
 
-이제 Phase 3 (웹 검색 기능) 설계부터 시작할 거야.
-Google Search API vs Serper API 비교하고,
-YouTube 검색 API 연동 방안 설계하자.
+오늘은 Phase 3 시작 전에 모델 정리부터 해야 해.
+1. GLM-OCR 삭제 (품질 불량 + 중국산 + 납품 불가)
+2. SOLAR:10.7b 설치 (한국산 Upstage, 납품 가능)
+3. EXAONE → Qwen3.5:3b 교체
+4. 4개 모델 비교 테스트
+
+가장 먼저 ollama rm glm-ocr 실행 후
+gemini.ts, page.tsx, CLAUDE.md 세 파일에서 GLM 제거하자.
 
 상황 파악되면 시작하자!
 ```
@@ -130,8 +148,8 @@ YouTube 검색 API 연동 방안 설계하자.
 - [x] DAILY_ROUTINE.md 작성
 - [x] 최종 커밋 및 푸시
 
-**다음 작업일:** 2026-05-19 (월요일)  
-**다음 목표:** Phase 3 웹 검색 기능 설계
+**다음 작업일:** 2026-05-14 (목요일)  
+**다음 목표:** Phase 3 시작 전 모델 정리 (GLM 삭제 → SOLAR 설치)
 
 ---
 
