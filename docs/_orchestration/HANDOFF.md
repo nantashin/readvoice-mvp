@@ -42,6 +42,11 @@
 - TypeScript strict mode 유지
 - CI 워크플로우 (npm install → lint → build)
 - orchestration 폴더 (TODAY.md, HANDOFF.md)
+- daily-report.ps1 완성 (2026-05-13)
+  - Phase 상태 표시 (save-state.md 덤프 제거)
+  - 오늘 커밋만 필터링 (날짜 기반)
+  - PS5.1 호환성 (Join-String 제거, 이모지 → 아스키)
+  - 로드맵 PPTX 자동 생성 (roadmap_YYYYMMDD.pptx)
 
 ---
 
@@ -79,11 +84,11 @@
 
 ## 다음 세션에 알려줄 것
 
-1. **v2.9.0 완성 🎉:** Phase 2 완전 완성 (음성명령/보안/이미지8종/UX개선)
-2. **Phase 3 시작 준비:** 웹 검색 기능 (YouTube, Google) 설계 및 구현
-3. **실제 테스트 필수:** 영수증/명함/차트/약봉투/QR 이미지로 8종 프롬프트 검증
-4. **30초 UX 개선:** classifyImage 중복 제거로 파일 분석 시작 시간 30초 단축
-5. **보안 강화 완료:** Codex Critical 이슈 모두 해결 (경로/크기/인젝션)
+1. **v2.9.0 완성 🎉:** Phase 2 완전 완성 (음성명령/보안/이미지8종/UX개선/인프라)
+2. **일일 보고서 자동화 완성:** daily-report.ps1 안정화 (PS5.1 호환, PPTX 자동 생성)
+3. **Phase 3 시작 준비:** 웹 검색 기능 (YouTube, Google) 설계부터 시작
+4. **실제 테스트 권장:** 영수증/명함/차트/약봉투/QR 이미지로 8종 프롬프트 검증
+5. **저녁 마무리 루틴:** version-save → daily-report → push (DAILY_ROUTINE.md 참고)
 
 ---
 
