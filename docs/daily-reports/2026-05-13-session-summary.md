@@ -1,7 +1,7 @@
 ﻿# 세션 요약 — 2026-05-13
 
 ## 작업 시간
-- **생성 시각:** 2026-05-13 18:03:18
+- **생성 시각:** 2026-05-13 18:19:35
 - **현재 버전:** v2.9.0
 - **브랜치:** master
 - **전체 진행률:** 50%
@@ -14,6 +14,8 @@
 [예정] Phase 5: 배포 패키지 (0%) — 키오스크·EXE·서버
 
 ## 오늘의 커밋 ()
+  - 07b1d06: fix: daily-report.ps1 PS5.1 호환성 수정
+  - 8209455: docs: 일일 보고서 자동 생성 (2026-05-13)
   - 4bd4386: docs: 2026-05-13 일일 보고서 자동 생성
   - 2b1bcb2: docs: HANDOFF.md 업데이트 - Phase 2 완성, Phase 3 준비
   - 269a32c: chore: v2.9.0 버전 저장 - Phase 2 완성
@@ -57,6 +59,7 @@
   - docs/versions/v2.9.0/version-meta.json
   - lib/vision/analyzer.ts
   - modules/ocr/gemini.ts
+  - scripts/daily-report.ps1
 
 ## 현재 이슈
 
