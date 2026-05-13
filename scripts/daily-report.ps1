@@ -1,4 +1,4 @@
-# =====================================================
+﻿# =====================================================
 # READ VOICE Pro 일일 개발 보고서 자동 생성
 # 사용법: .\scripts\daily-report.ps1
 # =====================================================
@@ -68,17 +68,23 @@ if ($commits) {
 }
 
 # 커밋 분류
-$featCommits  = $commits | Where-Object { $_ -match '\|feat:' }  | ForEach-Object { $_ -split '\|' | Select-Object -Index 0,1 | Join-String -Separator ' ' }
-$fixCommits   = $commits | Where-Object { $_ -match '\|fix:' }   | ForEach-Object { $_ -split '\|' | Select-Object -Index 0,1 | Join-String -Separator ' ' }
-$otherCommits = $commits | Where-Object { $_ -notmatch '\|feat:' -and $_ -notmatch '\|fix:' } | ForEach-Object { $_ -split '\|' | Select-Object -Index 0,1 | Join-String -Separator ' ' }
+$featCommits  = $commits | Where-Object { $_ -match '\|feat:' }  | ForEach-Object { ($_ -split '\|')[0,1] -join ' ' }
+$fixCommits   = $commits | Where-Object { $_ -match '\|fix:' }   | ForEach-Object { ($_ -split '\|')[0,1] -join ' ' }
+$otherCommits = $commits | Where-Object { $_ -notmatch '\|feat:' -and $_ -notmatch '\|fix:' } | ForEach-Object { ($_ -split '\|')[0,1] -join ' ' }
 
 $featList  = if ($featCommits)  { ($featCommits  | ForEach-Object { "- $_" }) -join "`n" } else { "- 없음" }
 $fixList   = if ($fixCommits)   { ($fixCommits   | ForEach-Object { "- $_" }) -join "`n" } else { "- 없음" }
 $otherList = if ($otherCommits) { ($otherCommits | ForEach-Object { "- $_" }) -join "`n" } else { "- 없음" }
 
-# 변경 파일 전체
-$changedFiles = git -C $ROOT diff --name-only "HEAD~$($commits.Count)..HEAD" 2>$null
-$changedList  = if ($changedFiles) { ($changedFiles | ForEach-Object { "- $_" }) -join "`n" } else { "- 없음" }
+# 변경 파일 전체 (오늘 커밋만)
+$changedFiles = $null
+if ($commits.Count -gt 0) {
+  $firstCommitToday = git -C $ROOT log --format="%H" --after="$Date 00:00" --before="$Date 23:59" 2>$null | Select-Object -Last 1
+  if ($firstCommitToday) {
+    $changedFiles = git -C $ROOT diff --name-only "${firstCommitToday}^..HEAD" 2>$null
+  }
+}
+$changedList = if ($changedFiles) { ($changedFiles | ForEach-Object { "- $_" }) -join "`n" } else { "- 오늘 변경된 파일 없음" }
 
 # ── 버전 정보 ──────────────────────────────────────
 $latestTag = git -C $ROOT describe --tags --abbrev=0 2>$null
@@ -135,8 +141,23 @@ if (Test-Path $roadmapPath) {
   }
 }
 
+# 현재 Phase 상태 문자열 생성
+$phaseLines = ""
+if (Test-Path $roadmapPath) {
+  $roadmap.phases | ForEach-Object {
+    $icon = switch ($_.status) {
+      "done"    { "[완료]" }
+      "current" { "[진행중]" }
+      "todo"    { "[예정]" }
+      default   { "[예정]" }
+    }
+    $phaseLines += "$icon $($_.phase): $($_.name) ($($_.pct)%) — $($_.detail)`n"
+  }
+}
+$phaseStatus = if ($phaseLines) { $phaseLines.Trim() } else { "로드맵 정보 없음" }
+
 # ── 기능 작동 여부 확인 ────────────────────────────
-function Check { param($path) if (Test-Path "$ROOT\$path") { "✅ 작동" } else { "❌ 파일 없음" } }
+function Check { param($path) if (Test-Path "$ROOT\$path") { "[OK] 작동" } else { "[X] 파일 없음" } }
 
 $statusVoice  = Check "app/api/chat/route.ts"
 $statusImage  = Check "modules/ocr/gemini.ts"
@@ -158,18 +179,22 @@ $ollamaVer = ollama --version 2>$null
 
 # ── 보고서 생성 ────────────────────────────────────
 $report = @"
-# READ VOICE Pro — 일일 개발 보고서
+# READ VOICE Pro (IYE:V2V) — 일일 개발 보고서
 - **날짜:** $Date
-- **생성 시각:** $DateTime
-- **현재 버전:** $latestTag
+- **버전:** $currentVersion
 - **브랜치:** $branch
 - **전체 진행률:** $totalPct%
 
 ---
 
+## 📍 현재 Phase 위치
+
+$phaseStatus
+
+---
+
 ## 📊 오늘의 작업 (커밋 $($commits.Count)개)
 
-### 커밋 상세 목록
 $commitDetails
 
 ### 기능 추가 (feat)
@@ -178,7 +203,7 @@ $featList
 ### 버그 수정 (fix)
 $fixList
 
-### 기타 (chore/docs/refactor)
+### 기타
 $otherList
 
 ### 오늘 변경된 파일
@@ -186,46 +211,7 @@ $changedList
 
 ---
 
-## 🚧 현재 진행 중인 작업
-
-$saveState
-
----
-
-## ✅ 현재 작동하는 기능 (데모 가능)
-
-| 기능 | 상태 |
-|------|------|
-| 음성 대화 (STT→LLM→TTS) | $statusVoice |
-| 이미지 분석 (Vision) | $statusImage |
-| PDF OCR | $statusPdf |
-| BGM 재생 | $statusBgm |
-| TTS 전처리 | $statusTts |
-| STT 음성 인식 | $statusStt |
-
----
-
-## 📱 Phase 2 목표 vs 현재
-
-### Phase 2 최종 목표
-$phase2Goal
-
-### 현재 진행률
-$phase2Pct% 완료
-
-### 지금 나오는 결과물
-- 음성으로 질문하면 AI가 음성으로 답변 $statusVoice
-- 이미지 업로드하면 한국어로 설명 $statusImage
-- PDF 업로드하면 텍스트 추출 후 읽어줌 $statusPdf
-- 분석 중 BGM 자동 재생 $statusBgm
-- 마크다운/특수기호 없이 자연스럽게 TTS 읽기 $statusTts
-
-### 부족한 부분 (TODO)
-$phase2Todo
-
----
-
-## 📅 다음 할 일
+## 📅 내일 할 일
 
 $nextTasks
 
@@ -237,11 +223,9 @@ $currentIssues
 
 ---
 
-## 🤖 설치된 Ollama 모델
+## ✅ 기능 작동 상태
 
-```
-$ollamaText
-```
+음성대화: $statusVoice / 이미지분석: $statusImage / PDF OCR: $statusPdf / BGM: $statusBgm / TTS: $statusTts
 
 ---
 
@@ -249,7 +233,6 @@ $ollamaText
 
 - **Node.js:** $nodeVer
 - **npm:** $npmVer
-- **Python:** $pythonVer
 - **Ollama:** $ollamaVer
 
 ---
@@ -297,13 +280,17 @@ $changedFilesSimple = if ($changedFiles) {
 
 $summaryTxt = @"
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-READ VOICE Pro - 일일 업무 보고 ($Date)
+READ VOICE Pro (IYE:V2V) - 일일 업무 보고 ($Date)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 📊 작업 개요
 - 작업 일자: $Date
 - 현재 버전: $currentVersion
 - 오늘 커밋 수: $commitCount개
+- 전체 진행률: $totalPct%
+
+📍 Phase 위치
+$phaseStatus
 
 ✅ 주요 완료 사항
 $commitListSimple
@@ -318,16 +305,12 @@ $currentIssues
 $nextTasks
 
 📈 현재 작동 상태
-✅ 음성 대화 ($statusVoice) / ✅ 이미지 분석 ($statusImage) / ✅ PDF OCR ($statusPdf) / ✅ BGM ($statusBgm) / ✅ TTS ($statusTts)
+음성대화 ($statusVoice) / 이미지분석 ($statusImage) / PDF OCR ($statusPdf) / BGM ($statusBgm) / TTS ($statusTts)
 
 🛠️ 개발 환경
 - Node.js: $nodeVer
 - npm: $npmVer
-- Python: $pythonVer
 - Ollama: $ollamaVer
-
-📦 설치된 Ollama 모델
-$ollamaText
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 작성: $DateTime | 다음 보고: 내일
@@ -353,6 +336,10 @@ $sessionMd = @"
 - **생성 시각:** $DateTime
 - **현재 버전:** $currentVersion
 - **브랜치:** $branch
+- **전체 진행률:** $totalPct%
+
+## Phase 위치
+$phaseStatus
 
 ## 오늘의 커밋 ($commitCount개)
 $commitListSimple
