@@ -1,0 +1,98 @@
+매일 반복 개발
+
+🌅 아침 시작:
+powershell
+cd C:\Users\tara0\readvoice-mvp  # 본인 경로로
+claude --continue
+---
+Claude Code가 열리면 이렇게만 말하세요:
+
+"docs/_orchestration/HANDOFF.md와 TODAY.md 읽고, 오늘 첫 번째 작업 계획만 먼저 보여줘"
+---
+
+파웟셀 1
+PS C:\Windows\System32> ollama serve
+
+파워셀 2
+PS C:\Windows\System32> cd C:\Users\tara0\readvoice-mvp
+PS C:\Users\tara0\readvoice-mvp> npm run dev
+
+🌇 저녁 마무리:
+powershell
+  cd C:\Users\tara0\readvoice-mvp>
+  .\scripts\version-save.ps1 -Version "v현재버전" -Message "오늘 완성한 것"
+  (.\scripts\version-save.ps1 -Version "v현재버전" -Message "오늘 완성한 것 한 줄 요약")
+---
+그리고 Claude Code에게:
+
+"HANDOFF.md 업데이트해줘. 오늘 완료한 것, 내일 할 것, 주의사항 포함, 정리해줘"
+---
+  추가로 작업 보고서가 필요하면:
+cd C:\Users\tara0\readvoice-mvp>
+  .\scripts\daily-report.ps1
+
+
+---
+🔄 사용량 다 썼을 때 (계정 전환 안 됨 → 이렇게 대처):
+
+제1계정 한도 소진 → 수동으로 제2계정 로그인
+Claude Code 터미널에서: claude --continue 그대로 실행
+HANDOFF.md가 있으면 컨텍스트 자동 복원됩니다
+---
+===============================
+계정 전환이 필요할 때를 대비해 — 방법 저장해두세요
+전환 시점: Claude Code가 아래 메시지를 보여줄 때입니다.
+---
+You've reached your usage limit.
+Your limit will reset at [시간].
+---
+
+전환 방법 (3단계):
+① Claude Code 터미널에서 먼저 HANDOFF 저장 요청
+---
+지금 사용량이 거의 다 됐어. HANDOFF.md 최신 상태로 업데이트하고
+현재 작업 상태 커밋해줘. 계정 전환할게.
+---
+
+② 브라우저에서 계정 전환
+---
+claude.ai 우측 상단 → 로그아웃
+→ arsenwatson@gmail.com 으로 로그인
+→ 새 대화 시작
+---
+
+③ 새 대화에 아래 메시지 붙여넣기
+---
+READ VOICE Pro (IYE:V2V) 프로젝트 이어받아.
+저장소: https://github.com/nantashin/readvoice-mvp
+
+docs/handoff/save-state.md 와
+docs/_orchestration/HANDOFF.md 를 읽고 상황 파악해줘.
+
+현재 작업 중: P2 이미지 유형별 프롬프트 8종 적용
+바로 이어서 시작하자.
+---
+=====================================
+
+
+ 마지막으로 서버는 npm run dev, ollama serve 각각 켜둔 터미널에서 Ctrl+C로 끄면 됩니다.
+
+---
+⚠️ 사각지대 & 최종 주의사항
+항목						주의
+--yolo / Always Proceed 모드	절대 사용 금지. 무인 강행은 접근성 서비스에서 특히 위험
+app/page.tsx 1182줄			지금 당장 깨뜨리지 말고, Phase 3 시작할 때 브랜치에서 분리
+계정 자동 전환				불가 + ToS 위반. HANDOFF.md로 수동 이어가기
+Realtime 음성 API			지금은 실험 단계. v2.8.x 완성 후 Stage 3에서 도입
+"처음부터 다시" 충동			v2.8.3이 작동 중임. 갈아엎지 말고 브랜치에서 개선
+
+🚦 결론 — 오늘 당장 할 것
+GPT의 방향은 맞지만, 순서가 틀렸습니다. 오늘 할 일 순서:
+
+지금 save-state.md 내용 붙여넣어 주시면 → 현황 완전 파악 후 즉시 개발 시작
+음성 명령 테스트 (원래 오늘 할 일)
+이미지 유형별 프롬프트 8종 적용
+완료 후 version-save.ps1 실행 → v2.8.3 보존
+
+IYE:V2V 리브랜딩과 구조 정비는 오늘 작업과 병행해서 이번 주 안에 순차적으로 진행하면 됩니다. 
+
