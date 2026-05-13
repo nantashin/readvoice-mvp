@@ -1,7 +1,7 @@
 {
-  "version": "v2.8.3",
+  "version": "v2.9.0",
   "lastUpdated": "2026-05-13",
-  "totalProgress": 38,
+  "totalProgress": 50,
   "phases": [
     {
       "phase": "Phase 1",
@@ -14,17 +14,17 @@
     {
       "phase": "Phase 2",
       "name": "OCR / Vision",
-      "status": "current",
-      "pct": 65,
-      "dates": "4.21~5.10",
+      "status": "done",
+      "pct": 100,
+      "dates": "4.21~5.13",
       "detail": "이미지·PDF 분석"
     },
     {
       "phase": "Phase 3",
       "name": "웹 검색 Agent",
-      "status": "todo",
+      "status": "current",
       "pct": 0,
-      "dates": "5.11~5.25",
+      "dates": "5.14~5.31",
       "detail": "말로 검색·요약"
     },
     {

@@ -195,3 +195,51 @@
 - 음성 파일 선택 시스템 완성
 - IYE:V2V (Intuitive Yes-Echo: Voice-to-Voice) 전환 준비
 
+
+## v2.9.0 (2026-05-13)
+**Phase:** Phase 2 완성 🎉
+**내용:** Phase 2 완성 - 음성명령/보안/이미지8종/UX개선 모두 완료
+**스냅샷:** docs/versions/v2.9.0/
+
+**주요 변경사항:**
+
+### 🎤 음성 명령 완성
+- "다시" 명령 구현 (lastSpoken state로 마지막 멘트 재생)
+- "멈춰" 음성 명령 구현 (TTS/BGM 중단)
+- 모델 선택: 일번~오번 (gemma4/qwen3.5/llama/glm/olmocr)
+- 속도 조절: 천천히/빠르게 (±0.5 배속)
+- 메뉴 제어: 처음으로 (메인 메뉴 복귀)
+
+### 🔒 보안 강화 (Codex Critical 이슈 해결)
+- watch-folder: 절대 경로 노출 제거, 10MB 파일 필터링
+- read-file: path.relative() 기반 안전한 경로 검증, 10MB 제한 (413 응답)
+- open-folder: exec → execFile 변경 (커맨드 인젝션 방지)
+
+### 🖼️ 이미지 8종 유형별 프롬프트
+- ImageType 정의: photo/document/mixed/receipt/namecard/chart/medicine/qrcode
+- 유형별 전용 프롬프트 8개 추가:
+  1. 사진 - 장면 상세 묘사
+  2. 문서 - 텍스트 정확 읽기
+  3. 혼합 - 글자 우선, 그림 설명 추가
+  4. 영수증 - 금액/날짜/항목 핵심 추출
+  5. 명함 - 이름/연락처/직책 순서
+  6. 차트 - 수치를 말로 설명
+  7. 약봉투 - 복용법 최우선
+  8. QR/바코드 - URL/숫자 추출
+- classifyImage 함수 8종 분류로 확장
+- extractTextFromImage에 imageType 자동 전달
+
+### ⚡ UX 개선 - 30초 절약
+- FileUpload에서 classifyImage 중복 호출 제거 (30초 절약)
+- "파일을 확인하고 있어요" 대기 시간 제거
+- /api/ocr에서만 8종 분류 수행 (한 번만)
+- 분석 후 "영수증으로 판단했어요" 등 8종 안내 TTS 추가
+- 코드 정리: 불필요한 이벤트 핸들러 3개 제거 (45줄)
+
+### 📁 코드 구조 개선
+- FileUpload.tsx 간소화 (60줄 → 20줄)
+- analyzer.ts autoClassify 기본값 true
+- lib/vision/analyzer.ts 타입 수정 (ImageType)
+
+---
+
