@@ -55,55 +55,68 @@
 ### [우선순위 0] GLM-OCR 삭제 🗑️
 **배경:** 품질 불량 + 중국산 + 납품 불가
 
-**작업 순서:**
-1. **Ollama 모델 삭제**
-   ```bash
-   ollama rm glm-ocr
-   ```
-2. **코드 제거 (3개 파일)**
-   - `modules/ocr/gemini.ts`: GLM 모델 정의 및 프롬프트 제거
-   - `app/page.tsx`: "지엘엠" 음성 선택 옵션 제거
-   - `CLAUDE.md`: GLM 관련 문서 제거
-3. **빌드 테스트**
-   ```bash
-   npm run build
-   ```
+**작업:**
+```bash
+ollama rm glm-ocr
+```
 
-### [우선순위 1] SOLAR:10.7b 설치 및 테스트 🇰🇷
-**배경:** 한국산 모델 (Upstage), Apache 2.0 라이선스, 납품 가능
+**코드 제거 (3개 파일):**
+- `modules/ocr/gemini.ts`: GLM 모델 정의 및 프롬프트 제거
+- `app/page.tsx`: "지엘엠" 음성 선택 옵션 제거
+- `CLAUDE.md`: GLM 관련 문서 제거
 
-**작업 순서:**
-1. **Ollama 모델 설치**
-   ```bash
-   ollama pull solar:10.7b
-   ```
-2. **코드 추가**
-   - `modules/ocr/gemini.ts`: SOLAR 모델 정의 추가
-   - `app/page.tsx`: "솔라" 음성 선택 옵션 추가
-3. **테스트 이미지로 품질 검증**
-   - 문서 OCR 테스트
-   - 이미지 설명 테스트
-   - 응답 속도 측정
+---
+
+### [우선순위 1] SOLAR:10.7b 설치 🇰🇷
+**배경:** 한국산 Upstage 모델, Apache 2.0 라이선스, 납품 가능
+
+**작업:**
+```bash
+ollama pull solar:10.7b
+```
+
+---
 
 ### [우선순위 2] EXAONE → Qwen3.5:3b 교체
-**배경:** EXAONE 번역 품질 개선 필요
+**배경:** 번역/대화 모델 개선
 
-**작업 순서:**
-1. **Ollama 모델 설치**
-   ```bash
-   ollama pull qwen3.5:3b
+**작업:**
+1. `.env.local` 파일에서 `OLLAMA_MODEL` 변경
    ```
-2. **lib/llm/index.ts 수정**
-   - EXAONE 대신 qwen3.5:3b 사용
-3. **번역 품질 테스트**
+   OLLAMA_MODEL=qwen3.5:3b
+   ```
+2. `CLAUDE.md` 파일에서 모델 목록 업데이트
+   - EXAONE 제거
+   - qwen3.5:3b 추가
 
-### [우선순위 3] 4개 모델 비교 테스트
-- qwen3.5:3b (번역/대화)
-- solar:10.7b (한국산 Vision)
-- gemma4:e4b (Google Vision)
-- llama3.2-vision (Meta Vision)
+---
 
-### [우선순위 4] 납품용/일반용 모델 확정
+### [우선순위 3] 4개 모델 비교 테스트 📊
+**테스트 모델:**
+- `qwen3.5:3b` (번역/대화)
+- `solar:10.7b` (한국산 Vision)
+- `gemma4:e4b` (Google Vision)
+- `llama3.2-vision` (Meta Vision)
+
+**비교 항목:**
+- 한국어 출력 품질
+- 번역 품질 (영어→한국어)
+- 응답 속도 (초 단위)
+- 메모리 사용량
+
+**결과 형식:** 마크다운 비교표
+
+---
+
+### [우선순위 4] 배포 모드 분기 설계 🔀
+**파일:** `lib/llm/router.ts` (신규 생성)
+
+**설계 내용:**
+```typescript
+// DEPLOY_MODE 환경변수 기반 모델 라우팅
+// - public: qwen, gemma, llama (범용)
+// - enterprise: solar, claude API (납품용)
+```
 
 **납품 제약사항:**
 - ❌ 납품 제외: qwen(중국), glm(중국)
@@ -145,9 +158,14 @@
 
 1. **v2.9.0 완성 🎉:** Phase 2 완전 완성 (음성명령/보안/이미지8종/UX개선/인프라)
 2. **일일 보고서 자동화 완성:** daily-report.ps1 안정화 (PS5.1 호환, PPTX 자동 생성)
-3. **Phase 3 첫 작업:** GLM-OCR 삭제 → SOLAR 설치 → EXAONE 교체 → 모델 비교 테스트
-4. **납품 준비:** 중국산 모델(qwen, glm) 제외, Apache 2.0 라이선스만 계약서 명시
-5. **내일 최우선 작업:** ollama rm glm-ocr 후 코드 3곳 제거 (gemini.ts, page.tsx, CLAUDE.md)
+3. **오늘 작업:** 모델 교체 테스트 (P0→P1→P2→P3→P4)
+   - P0: GLM-OCR 삭제 (ollama rm + 코드 제거)
+   - P1: SOLAR:10.7b 설치 (ollama pull)
+   - P2: EXAONE → Qwen3.5:3b 교체 (.env.local + CLAUDE.md)
+   - P3: 4개 모델 비교 테스트 (품질/속도 비교표)
+   - P4: lib/llm/router.ts DEPLOY_MODE 분기 설계
+4. **납품 준비:** 중국산(qwen, glm) 제외, Apache 2.0만 허용
+5. **최우선:** ollama rm glm-ocr 후 gemini.ts/page.tsx/CLAUDE.md 제거
 
 ---
 

@@ -57,32 +57,34 @@ c98e57e - feat: CI 추가 + orchestration 폴더 + Codex 리뷰 + IYE:V2V 전환
 - [ ] `modules/ocr/gemini.ts` - GLM 모델 정의 및 프롬프트 제거
 - [ ] `app/page.tsx` - "지엘엠" 음성 선택 옵션 제거
 - [ ] `CLAUDE.md` - GLM 관련 문서 제거
-- [ ] `npm run build` 테스트
 
-### [P1] SOLAR:10.7b 설치 및 테스트 🇰🇷
+### [P1] SOLAR:10.7b 설치 🇰🇷
 - [ ] `ollama pull solar:10.7b` 실행
-- [ ] `modules/ocr/gemini.ts` - SOLAR 모델 정의 추가
-- [ ] `app/page.tsx` - "솔라" 음성 선택 옵션 추가
-- [ ] 문서 OCR 테스트
-- [ ] 이미지 설명 테스트
-- [ ] 응답 속도 측정
 
 ### [P2] EXAONE → Qwen3.5:3b 교체
-- [ ] `ollama pull qwen3.5:3b` 실행
-- [ ] `lib/llm/index.ts` - EXAONE 대신 qwen3.5:3b 사용
-- [ ] 번역 품질 테스트
+- [ ] `.env.local` 파일에서 `OLLAMA_MODEL=qwen3.5:3b` 변경
+- [ ] `CLAUDE.md` 파일에서 모델 목록 업데이트 (EXAONE 제거, qwen3.5:3b 추가)
 
-### [P3] 4개 모델 비교 테스트
+### [P3] 4개 모델 비교 테스트 📊
+**테스트 모델:**
 - [ ] qwen3.5:3b (번역/대화)
 - [ ] solar:10.7b (한국산 Vision)
 - [ ] gemma4:e4b (Google Vision)
 - [ ] llama3.2-vision (Meta Vision)
 
-### [P4] 납품용/일반용 모델 확정
-- [ ] 테스트 결과 정리
-- [ ] 납품용 모델 선정 (solar + claude API)
-- [ ] 일반용 모델 선정
-- [ ] 계약서 라이선스 조항 초안
+**비교 항목:**
+- [ ] 한국어 출력 품질
+- [ ] 번역 품질 (영어→한국어)
+- [ ] 응답 속도 (초 단위)
+- [ ] 메모리 사용량
+- [ ] 결과를 마크다운 비교표로 정리
+
+### [P4] 배포 모드 분기 설계 🔀
+- [ ] `lib/llm/router.ts` 파일 신규 생성
+- [ ] `DEPLOY_MODE` 환경변수 기반 모델 라우팅 설계
+  - `public`: qwen, gemma, llama (범용)
+  - `enterprise`: solar, claude API (납품용)
+- [ ] 납품 제약사항 주석 추가 (중국산 제외, Apache 2.0만 허용)
 
 ## 알려진 이슈
 
@@ -117,24 +119,34 @@ https://github.com/nantashin/readvoice-mvp
 ## 📋 내일 아침(2026-05-14) 시작 메시지 (복사용)
 
 ```
-안녕! 내일 시작이야.
+안녕! 내일(2026-05-14 목요일) 시작이야.
 
 docs/_orchestration/HANDOFF.md 읽고 오늘 P0 계획만 먼저 보여줘.
 
-Phase 2 (v2.9.0) 완성됐어:
-- 음성명령/보안/이미지8종/UX개선/인프라 모두 완료
-- 일일 보고서 자동화도 안정화 완료
+Phase 2 (v2.9.0) 완성됐어.
+오늘은 Phase 3 시작 전에 모델 교체 작업부터 해야 해.
 
-오늘은 Phase 3 시작 전에 모델 정리부터 해야 해.
-1. GLM-OCR 삭제 (품질 불량 + 중국산 + 납품 불가)
-2. SOLAR:10.7b 설치 (한국산 Upstage, 납품 가능)
-3. EXAONE → Qwen3.5:3b 교체
-4. 4개 모델 비교 테스트
+[오늘 작업 순서]
+P0: GLM-OCR 삭제
+  - ollama rm glm-ocr
+  - gemini.ts, page.tsx, CLAUDE.md 에서 GLM 제거
 
-가장 먼저 ollama rm glm-ocr 실행 후
-gemini.ts, page.tsx, CLAUDE.md 세 파일에서 GLM 제거하자.
+P1: SOLAR:10.7b 설치
+  - ollama pull solar:10.7b
 
-상황 파악되면 시작하자!
+P2: EXAONE → Qwen3.5:3b 교체
+  - .env.local OLLAMA_MODEL 변경
+  - CLAUDE.md 모델 목록 업데이트
+
+P3: 4개 모델 비교 테스트
+  - qwen3.5:3b / solar:10.7b / gemma4:e4b / llama3.2-vision
+  - 한국어 품질, 번역 품질, 응답 속도 비교표 작성
+
+P4: lib/llm/router.ts 에 DEPLOY_MODE 분기 설계
+  - public: qwen, gemma, llama
+  - enterprise: solar, claude API
+
+가장 먼저 P0부터 시작하자!
 ```
 
 ---
