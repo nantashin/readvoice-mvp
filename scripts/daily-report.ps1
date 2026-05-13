@@ -364,6 +364,29 @@ Write-Host "✅ 세션 요약 MD 생성 완료" -ForegroundColor Green
 Write-Host "   📁 $sessionMdPath" -ForegroundColor Gray
 
 # ══════════════════════════════════════════════════════
+# ✨ 로드맵 PPTX 생성
+# ══════════════════════════════════════════════════════
+Write-Host "📊 로드맵 PPTX 생성 중..." -ForegroundColor Yellow
+
+$nodeCheck = node --version 2>$null
+if ($nodeCheck) {
+  try {
+    node "$ROOT\scripts\generate-roadmap.js" 2>$null
+    $pptxFile = "$ROOT\docs\daily-reports\roadmap_$($Date.Replace('-','')).pptx"
+    if (Test-Path $pptxFile) {
+      Write-Host "✅ 로드맵 PPTX 생성 완료" -ForegroundColor Green
+      Write-Host "   📁 $pptxFile" -ForegroundColor Gray
+    } else {
+      Write-Host "⚠️  PPTX 파일 생성 실패 (경로 확인 필요)" -ForegroundColor Yellow
+    }
+  } catch {
+    Write-Host "⚠️  PPTX 생성 중 오류: $_" -ForegroundColor Yellow
+  }
+} else {
+  Write-Host "⚠️  Node.js 없음 (PPTX 생성 스킵)" -ForegroundColor Yellow
+}
+
+# ══════════════════════════════════════════════════════
 # 🔄 Git Add & Commit
 # ══════════════════════════════════════════════════════
 Write-Host "🔄 Git에 보고서 추가 중..." -ForegroundColor Yellow
