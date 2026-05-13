@@ -219,53 +219,8 @@ export default function Home() {
     return () => window.removeEventListener("imageSelected", handleImageSelected as EventListener)
   }, [startListening])
 
-  // imageDocSelected 이벤트 수신 (문서 이미지)
-  useEffect(() => {
-    const handleImageDocSelected = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("document")
-      setMenuState("model_select")
-      setMicState("off")
-
-      setTimeout(() => startListening(), 500)
-    }
-
-    window.addEventListener("imageDocSelected", handleImageDocSelected as EventListener)
-    return () => window.removeEventListener("imageDocSelected", handleImageDocSelected as EventListener)
-  }, [startListening])
-
-  // imageMixedSelected 이벤트 수신 (혼합)
-  useEffect(() => {
-    const handleImageMixedSelected = (event: CustomEvent<{ file: File, classification: string }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType("image") // 혼합은 일단 image로 처리
-      setMenuState("confirm") // 특수 모드: 그림 먼저 vs 글자 먼저
-      setMicState("off")
-
-      setTimeout(() => startListening(), 500)
-    }
-
-    window.addEventListener("imageMixedSelected", handleImageMixedSelected as EventListener)
-    return () => window.removeEventListener("imageMixedSelected", handleImageMixedSelected as EventListener)
-  }, [startListening])
-
-  // classifyFailed 이벤트 수신
-  useEffect(() => {
-    const handleClassifyFailed = (event: CustomEvent<{ file: File }>) => {
-      const { file } = event.detail
-      setPendingFile(file)
-      setFileType(null)
-      setMenuState("model_select")
-      setMicState("off")
-
-      setTimeout(() => startListening(), 500)
-    }
-
-    window.addEventListener("classifyFailed", handleClassifyFailed as EventListener)
-    return () => window.removeEventListener("classifyFailed", handleClassifyFailed as EventListener)
-  }, [startListening])
+  // imageDocSelected, imageMixedSelected, classifyFailed 이벤트 핸들러 제거됨
+  // 이유: FileUpload에서 classifyImage를 제거하고 /api/ocr에서만 8종 분류 수행
 
   // pdfScannedSelected 이벤트 수신
   useEffect(() => {

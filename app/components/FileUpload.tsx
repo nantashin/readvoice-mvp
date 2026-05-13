@@ -6,7 +6,6 @@ import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
 import { analyzeFile, MODELS, type VisionModel } from "@/lib/vision/analyzer"
 import { bgmManager } from "@/lib/audio/bgm-manager"
-import { classifyImage } from "@/modules/ocr/gemini"
 
 // 이미지 설명용 모델 (4개) - GLM 제거
 export const IMAGE_MODELS = [
@@ -178,10 +177,39 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         return
       }
 
-      // 분석 완료 - 한국어 결과 전달
-      // 다국어 지원 예정: result.language에 따라 다른 처리 가능
-      onResult(result.text)
-      onStatusChange("speaking")
+      // 분석 완료 - imageType 기반 안내 + 결과 전달
+      if (result.classification) {
+        const imageTypeMessages: Record<string, string> = {
+          "receipt": "영수증으로 판단했어요.",
+          "namecard": "명함으로 판단했어요.",
+          "chart": "차트로 판단했어요.",
+          "medicine": "약봉투로 판단했어요.",
+          "qrcode": "QR코드로 판단했어요.",
+          "document": "문서로 판단했어요.",
+          "photo": "사진으로 판단했어요.",
+          "mixed": "그림과 글자가 함께 있는 이미지예요."
+        }
+
+        const typeMsg = imageTypeMessages[result.classification] || ""
+        if (typeMsg) {
+          bgmManager.stop()
+          onStatusChange("speaking")
+          tts.speak(typeMsg, 1.0, () => {
+            // 짧은 딜레이 후 분석 결과 읽기
+            setTimeout(() => {
+              onResult(result.text)
+              onStatusChange("speaking")
+            }, 500)
+          })
+        } else {
+          onResult(result.text)
+          onStatusChange("speaking")
+        }
+      } else {
+        // classification 없으면 바로 결과 읽기
+        onResult(result.text)
+        onStatusChange("speaking")
+      }
     } catch {
       const msg = "네트워크 오류가 발생했습니다. 다시 시도해주세요."
       setError(msg)
@@ -216,65 +244,29 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
 
     // 이미지 파일
     if (validation.isImage) {
-      console.log("[파일 업로드] 이미지 선택됨 - 자동 분류 시작")
-      setLoading(true)
-      onStatusChange("processing")
+      console.log("[파일 업로드] 이미지 선택됨")
+      setLoading(false)
 
-      // 첫 번째 안내: 파일 확인 중
-      tts.speak("파일을 확인하고 있어요.", 1.0, () => {
-        bgmManager.start()
+      // 기본 모델 가져오기
+      const defaultModel = localStorage.getItem("defaultModel") || "gemma4:e4b"
+
+      // 모델 선택 안내 (분류 없이 바로)
+      const msg = "기본 모델은 구글 4기가예요. 이미지 위주라면 구글 4기가, 큐쓰리, 구글 2기가, 라마비전 중에서 선택하세요. 텍스트 문서라면 구글 4기가, 큐쓰리, 구글 2기가, 라마비전, 올름오씨알 중에서 선택하세요. 어떤 모델로 읽어드릴까요?"
+      onStatusChange("speaking")
+      tts.speak(msg, 1.0, () => {
+        // 10초 대기 타이머
+        modelSelectionTimerRef.current = setTimeout(() => {
+          console.log("[자동 선택] 응답 없음, 기본 모델로 시작:", defaultModel)
+          const autoStartMsg = "응답이 없어서 기본 모델인 구글 4기가로 시작할게요."
+          tts.speak(autoStartMsg, 1.0, () => {
+            onStatusChange("processing")
+            processFile(file, defaultModel)
+          })
+        }, 10000)
       })
 
-      try {
-        const arrayBuffer = await file.arrayBuffer()
-        const buffer = Buffer.from(arrayBuffer)
-        const classification = await classifyImage(buffer, file.name)
-
-        console.log("[자동 분류] 결과:", classification)
-        bgmManager.stop()
-
-        // 기본 모델: 구글 4기가
-        const defaultModel = localStorage.getItem("defaultModel") || "gemma4:e4b"
-
-        // 두 번째 안내: 기본 모델 + 선택 안내
-        const msg = "기본 모델은 구글 4기가예요. 이미지 위주라면 구글 4기가, 큐쓰리, 구글 2기가, 라마비전 중에서 선택하세요. 텍스트 문서라면 구글 4기가, 큐쓰리, 구글 2기가, 라마비전, 올름오씨알 중에서 선택하세요. 어떤 모델로 읽어드릴까요?"
-        onStatusChange("speaking")
-        tts.speak(msg, 1.0, () => {
-          // 10초 대기 타이머 시작
-          modelSelectionTimerRef.current = setTimeout(() => {
-            // 응답 없으면 기본 모델로 자동 시작
-            console.log("[자동 선택] 응답 없음, 기본 모델로 시작:", defaultModel)
-            const autoStartMsg = `응답이 없어서 기본 모델인 구글 4기가로 시작할게요.`
-            tts.speak(autoStartMsg, 1.0, () => {
-              onStatusChange("processing")
-              processFile(file, defaultModel)
-            })
-          }, 10000)
-        })
-
-        // 이벤트 발송 (page.tsx에서 모델 선택 대기)
-        if (classification === "document") {
-          window.dispatchEvent(new CustomEvent("imageDocSelected", { detail: { file } }))
-        } else if (classification === "photo") {
-          window.dispatchEvent(new CustomEvent("imageSelected", { detail: { file } }))
-        } else {
-          window.dispatchEvent(new CustomEvent("imageMixedSelected", { detail: { file, classification } }))
-        }
-      } catch (e) {
-        console.error("[자동 분류] 실패:", e)
-        bgmManager.stop()
-        const msg = "자동 판단이 어려웠어요. 이미지인지 문서인지 말씀해 주세요."
-        onStatusChange("speaking")
-        tts.speak(msg)
-
-        const ttsDelay = (msg.length / 10) * 1000 + 1000
-        setTimeout(() => {
-          onStatusChange("idle")
-          window.dispatchEvent(new CustomEvent("classifyFailed", { detail: { file } }))
-        }, ttsDelay)
-      } finally {
-        setLoading(false)
-      }
+      // 이벤트 발송 (범용)
+      window.dispatchEvent(new CustomEvent("imageSelected", { detail: { file } }))
       return
     }
 

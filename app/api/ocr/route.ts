@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { SUPPORTED_TYPES, MAX_FILE_SIZE } from "@/modules/ocr"
 import { extractTextFromPDF, extractTextOnly } from "@/modules/ocr/pdf"
-import { extractTextFromImage } from "@/modules/ocr/gemini"
+import { extractTextFromImage, classifyImage } from "@/modules/ocr/gemini"
 
 export async function POST(req: NextRequest) {
   try {
@@ -80,11 +80,15 @@ export async function POST(req: NextRequest) {
       const text = await extractTextFromPDF(buffer, file.name, model)
       return NextResponse.json({ text })
     } else {
-      // 이미지 파일은 Vision 모델로만 처리 (Tesseract 제외)
-      console.log("[API] 이미지 Vision 분석 (모델:", model, ")")
-      const result = await extractTextFromImage(buffer, file.type, file.name, model)
+      // 이미지 파일: 1. 분류 → 2. Vision 분석
+      console.log("[API] 이미지 자동 분류 시작...")
+      const imageType = await classifyImage(buffer, file.name)
+      console.log("[API] 이미지 유형:", imageType)
+
+      console.log("[API] 이미지 Vision 분석 (모델:", model, ", 유형:", imageType, ")")
+      const result = await extractTextFromImage(buffer, file.type, file.name, model, imageType)
       // extractTextFromImage는 { korean, english } 객체를 반환
-      return NextResponse.json({ text: result.korean, original: result.english })
+      return NextResponse.json({ text: result.korean, original: result.english, imageType })
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "텍스트 추출에 실패했습니다."

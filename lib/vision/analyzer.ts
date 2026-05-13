@@ -12,19 +12,19 @@ export interface AnalysisResult {
   text: string
   original?: string
   error?: string
-  classification?: "document" | "photo" | "mixed"
+  classification?: import("@/modules/ocr/gemini").ImageType
 }
 
 import { compressImage } from "@/lib/file/compressor"
-import { classifyImage } from "@/modules/ocr/gemini"
+import { classifyImage, type ImageType } from "@/modules/ocr/gemini"
 
 export async function analyzeFile(
   file: File,
   model: VisionModel,
   mode?: "ocr" | "describe",
-  autoClassify: boolean = false
+  autoClassify: boolean = true
 ): Promise<AnalysisResult> {
-  let classification: "document" | "photo" | "mixed" | undefined
+  let classification: ImageType | undefined
 
   // 이미지 파일인 경우 자동 분류
   const isImage = file.type.startsWith("image/")
