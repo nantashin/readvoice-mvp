@@ -65,6 +65,7 @@ export default function Home() {
   const [pendingAction, setPendingAction] = useState<string>("")
   // 다국어 지원 예정: const [selectedLanguage, setSelectedLanguage] = useState<string>("ko")
   const [lastResponse, setLastResponse] = useState<string>("")
+  const [lastSpoken, setLastSpoken] = useState<string>("")
   const [previousMenuState, setPreviousMenuState] = useState<MenuState>("idle")
   const [fileType, setFileType] = useState<FileType>(null)
   const [youtubeResults, setYoutubeResults] = useState<{title:string,url:string}[]>([])
@@ -169,6 +170,9 @@ export default function Home() {
       clearTimeout(recommendTimerRef.current)
       recommendTimerRef.current = null
     }
+
+    // 마지막 멘트 저장 (다시 재생용)
+    setLastSpoken(text)
 
     // TTS 전처리: 불릿/특수기호 제거, 마크다운 정리
     const cleanedText = cleanForTTS(text)
@@ -450,6 +454,25 @@ export default function Home() {
 
     // 사용자 활동 감지 - 타이머 리셋
     sessionManager.resetTimer()
+
+    // ── 전역 명령어: 멈춰 / 다시 ──────────────
+    // 멈춰 - TTS/BGM 중단
+    if (/멈춰|그만|취소|중지|스톱/.test(t)) {
+      window.speechSynthesis.cancel()
+      bgmManager.pause()
+      speak("멈췄어요. 스페이스바를 누르고 말씀해 주세요.", speechRate)
+      return
+    }
+
+    // 다시 - 마지막 멘트 재생
+    if (/다시|반복|다시읽어|다시해줘/.test(t)) {
+      if (lastSpoken) {
+        speak(lastSpoken, speechRate)
+      } else {
+        speak("다시 들려드릴 내용이 없어요.", speechRate)
+      }
+      return
+    }
 
     // ── 침묵 처리 (너무 짧거나 비어있음) ──────────────
     if (!transcript || transcript.trim().length < 2) {
