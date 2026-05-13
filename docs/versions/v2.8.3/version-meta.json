@@ -1,7 +1,7 @@
 {
   "version": "v2.8.3",
-  "date": "2026-05-11_18-35",
+  "date": "2026-05-13",
   "phase": "Phase 2",
-  "message": "MenuState 오류 수정, 빌드 성공",
+  "message": "CI 추가 + orchestration 폴더 + IYE:V2V 전환 준비 완료",
   "gitTag": "v2.8.3"
 }

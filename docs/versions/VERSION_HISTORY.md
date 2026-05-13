@@ -176,3 +176,22 @@
 **내용:** MenuState 오류 수정, 빌드 성공
 **스냅샷:** docs/versions/v2.8.3/
 
+
+## v2.8.3 (2026-05-11_18-46)
+**Phase:** Phase 2
+**내용:** 빌드 성공, 음성 파일 선택 시스템
+**스냅샷:** docs/versions/v2.8.3/
+
+
+## v2.8.3 (2026-05-13)
+**Phase:** Phase 2
+**내용:** CI 추가 + orchestration 폴더 + IYE:V2V 전환 준비 완료
+**스냅샷:** docs/versions/v2.8.3/
+
+**주요 변경사항:**
+- GitHub Actions CI 워크플로우 추가 (npm install → lint → build)
+- docs/_orchestration/ 폴더 생성 (TODAY.md, HANDOFF.md)
+- 세션 관리 최적화 (10분 타임아웃, 30초 피드백 윈도우)
+- 음성 파일 선택 시스템 완성
+- IYE:V2V (Intuitive Yes-Echo: Voice-to-Voice) 전환 준비
+
