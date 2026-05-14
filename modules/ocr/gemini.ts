@@ -19,8 +19,7 @@ const KOREAN_NATIVE_MODELS = [
   "gemma4:e2b",
   "gemma4:e4b",
   "qwen3.5:9b",
-  "richardyoung/olmocr2:7b-q8",
-  "glm-ocr"
+  "richardyoung/olmocr2:7b-q8"
 ]
 
 // 번역 필요 모델 (이미지 묘사 전용, PDF OCR 제외)
@@ -99,24 +98,6 @@ const OLMOCR2_PROMPT = `이 문서의 모든 텍스트를 순서대로 읽어줘
 6. 제목, 본문, 각주, 서명 등 모든 텍스트 빠짐없이
 
 한국어로만 답해줘.`
-
-// glm-ocr 전용 프롬프트 (문서 OCR)
-const GLM_OCR_PROMPT = `이 이미지의 모든 글자를 정확히 읽어줘.
-
-중요: 텍스트 읽기가 최우선 과제야. 보이는 모든 글자, 숫자, 기호를 빠짐없이 읽어줘.
-
-순서:
-1. 제일 큰 글씨(제목) 먼저 - 위치와 크기 언급: "화면 중앙 상단에 큰 글씨로: [텍스트]"
-2. 화면 중앙 상단 제목 우선
-3. 이후 왼쪽→오른쪽, 위→아래 순서로 모든 텍스트 읽기
-4. <>, <<>>, [], {} 기호 안의 텍스트는 제목/소제목이므로 반드시 읽어줘 (기호만 빼고 내용은 읽기)
-5. 작은 글씨도 놓치지 말고 읽기: "작은 글씨로: [텍스트]"
-6. 표가 있으면 표 형태 그대로 읽기
-7. 화살표(→, ⇒)나 연결선이 있으면 연결된 내용을 이어서 읽기
-
-규칙:
-- 모든 글자를 정확히 읽는 것이 최우선!
-- 한국어로만 답해줘. 영어 금지.`
 
 // ======== 유형별 전용 프롬프트 (8종) ========
 
@@ -625,7 +606,6 @@ export async function extractTextFromImage(
   const isLlama = model === "llama3.2-vision:11b-instruct-q4_K_M"
   const isGemma4E4B = model === "gemma4:e4b"
   const isOlmOCR2 = model === "richardyoung/olmocr2:7b-q8"
-  const isGlmOCR = model === "glm-ocr"
 
   // 프롬프트 선택 (imageType 우선, 모델별 폴백)
   let prompt = UNIFIED_PROMPT  // 기본값
@@ -655,8 +635,6 @@ export async function extractTextFromImage(
     prompt = GEMMA4_E4B_PROMPT
   } else if (isOlmOCR2) {
     prompt = OLMOCR2_PROMPT
-  } else if (isGlmOCR) {
-    prompt = GLM_OCR_PROMPT
   }
 
   console.log(`[Vision] 모델: ${model}, 한국어직접: ${isKoreanNative}, 라마: ${isLlama}, E4B: ${isGemma4E4B}`)
@@ -675,7 +653,6 @@ export async function extractTextFromImage(
     "gemma4:e4b": 120000,
     "qwen3.5:9b": 180000,
     "richardyoung/olmocr2:7b-q8": 120000,
-    "glm-ocr": 120000,
     "llama3.2-vision:11b-instruct-q4_K_M": 600000,
   }
   const timeout = timeouts[model] || 120000
