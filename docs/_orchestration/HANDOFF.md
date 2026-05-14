@@ -1,6 +1,6 @@
 # Session Handoff
 
-**마지막 업데이트:** 2026-05-13  
+**마지막 업데이트:** 2026-05-14  
 **현재 버전:** v2.9.0 🎉  
 **다음 버전 목표:** v3.0.0 (Phase 3 시작)
 
@@ -64,41 +64,21 @@
 - TTS명: "솔라", 성능: 1.5~2분 추정
 - 커밋: `a743ad7` - feat: SOLAR:10.7b 한국산 모델 설치 완료 (P1)
 
----
-
-## 다음에 할 일 (계정 전환 후)
-
-### [우선순위 2] EXAONE → Qwen3.5:3b 교체 🔄
-**배경:** 번역/대화 모델 개선
-
-**작업:**
-1. `.env.local` 파일에서 `OLLAMA_MODEL` 변경
-   ```
-   OLLAMA_MODEL=qwen3.5:3b
-   ```
-2. `CLAUDE.md` 파일에서 모델 목록 업데이트
-   - EXAONE 제거
-   - qwen3.5:3b 추가
+### ✅ [P2] Qwen3.5:4b 번역/대화 모델 교체 완료
+- `ollama pull qwen3.5:4b` 실행
+- `.env.local`: `OLLAMA_MODEL=qwen3.5:4b`
+- `CLAUDE.md`: Default Model, Translation, Voice 처리 업데이트 (EXAONE → Qwen3.5)
+- `app/api/chat/route.ts`: thinking mode 억제 추가
+- `modules/ocr/gemini.ts`: translateToKorean 함수 qwen3.5:4b + thinking mode 억제
+- 커밋: `cfa39ac` - feat: Qwen3.5:4b 번역/대화 모델 교체 완료 (P2)
 
 ---
 
-### [우선순위 2] EXAONE → Qwen3.5:3b 교체
-**배경:** 번역/대화 모델 개선
+## 다음에 할 일 (2026-05-15 이후)
 
-**작업:**
-1. `.env.local` 파일에서 `OLLAMA_MODEL` 변경
-   ```
-   OLLAMA_MODEL=qwen3.5:3b
-   ```
-2. `CLAUDE.md` 파일에서 모델 목록 업데이트
-   - EXAONE 제거
-   - qwen3.5:3b 추가
-
----
-
-### [우선순위 3] 4개 모델 비교 테스트 📊
+### [P3] 4개 모델 비교 테스트 📊
 **테스트 모델:**
-- `qwen3.5:3b` (번역/대화)
+- `qwen3.5:4b` (번역/대화)
 - `solar:10.7b` (한국산 Vision)
 - `gemma4:e4b` (Google Vision)
 - `llama3.2-vision` (Meta Vision)
@@ -109,11 +89,22 @@
 - 응답 속도 (초 단위)
 - 메모리 사용량
 
-**결과 형식:** 마크다운 비교표
+**결과 형식:** 마크다운 비교표 생성
 
 ---
 
-### [우선순위 4] 배포 모드 분기 설계 🔀
+### [TTS 개선] Web Speech API → Edge TTS 교체
+**배경:** 더 자연스러운 한국어 TTS 필요
+
+**작업:**
+- Edge TTS 설치 및 연동
+- 음성 선택: sun-hi / yu-jin / hyunsu
+- 음성 명령 유지 (일번~오번, 천천히/빠르게, 다시, 멈춰)
+- 기존 Web Speech API 코드 대체
+
+---
+
+### [P4] 배포 모드 분기 설계 🔀
 **파일:** `lib/llm/router.ts` (신규 생성)
 
 **설계 내용:**
@@ -129,7 +120,9 @@
 - 📄 라이선스: Apache 2.0 모델만 납품 계약서 명시
 - 📦 납품 버전: 모델 다운로드 포함 패키지 제공
 
-### [우선순위 1] 실제 이미지 테스트 🔬
+---
+
+### [추가 작업] 실제 이미지 테스트 🔬
 - **영수증** 이미지로 금액/날짜 추출 테스트
 - **명함** 이미지로 이름/연락처 추출 테스트
 - **차트** 이미지로 수치 설명 테스트
@@ -137,17 +130,13 @@
 - **QR코드** 이미지로 URL 추출 테스트
 - 8종 프롬프트 품질 검증 및 개선
 
-### [우선순위 2] Phase 3 웹 검색 기능 설계
+---
+
+### [Phase 3 준비] 웹 검색 기능 설계
 - Google Search API 또는 Serper API 연동 방안
 - YouTube 검색 및 요약 기능 설계
 - "유튜브에서 ○○ 찾아줘" 음성 명령 파이프라인
 - 검색 결과 TTS 요약 전략
-
-### [우선순위 3] Phase 3 구현
-- 웹 검색 API 연동
-- 검색 결과 파싱 및 요약
-- 음성 명령 확장 (search 모드)
-- TTS 읽기 최적화 (긴 텍스트 요약)
 
 ---
 
@@ -159,18 +148,22 @@
 
 ---
 
-## 내일 아침(2026-05-14)에 알려줄 것
+## 내일 아침(2026-05-15)에 알려줄 것
 
-1. **v2.9.0 완성 🎉:** Phase 2 완전 완성 (음성명령/보안/이미지8종/UX개선/인프라)
-2. **일일 보고서 자동화 완성:** daily-report.ps1 안정화 (PS5.1 호환, PPTX 자동 생성)
-3. **오늘 작업:** 모델 교체 테스트 (P0→P1→P2→P3→P4)
-   - P0: GLM-OCR 삭제 (ollama rm + 코드 제거)
-   - P1: SOLAR:10.7b 설치 (ollama pull)
-   - P2: EXAONE → Qwen3.5:3b 교체 (.env.local + CLAUDE.md)
-   - P3: 4개 모델 비교 테스트 (품질/속도 비교표)
+1. **오늘(05-14) 완료 🎉:**
+   - P0: GLM-OCR 삭제 완료
+   - P1: SOLAR:10.7b 설치 완료 (한국산 모델)
+   - P2: Qwen3.5:4b 번역/대화 모델 교체 완료 (thinking mode 억제 포함)
+   
+2. **다음 작업 우선순위:**
+   - P3: 4개 모델 비교 테스트 (qwen3.5:4b / solar / gemma4 / llama3.2)
+   - TTS 개선: Web Speech API → Edge TTS (sun-hi/yu-jin/hyunsu)
    - P4: lib/llm/router.ts DEPLOY_MODE 분기 설계
-4. **납품 준비:** 중국산(qwen, glm) 제외, Apache 2.0만 허용
-5. **최우선:** ollama rm glm-ocr 후 gemini.ts/page.tsx/CLAUDE.md 제거
+   
+3. **납품 준비 상태:**
+   - ❌ 제외: qwen(중국), glm(중국)
+   - ✅ 허용: solar(한국), claude API, gemma(Google), llama(Meta)
+   - Apache 2.0 라이선스만 납품 가능
 
 ---
 
