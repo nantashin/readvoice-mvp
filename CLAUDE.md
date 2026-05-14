@@ -35,7 +35,7 @@
 
 ### 백엔드
 - **LLM:** LangChain ChatOllama (로컬)
-- **Default Model:** exaone3.5:2.4b
+- **Default Model:** qwen3.5:4b
 - **이미지 설명 모델 (5개):**
   - solar:10.7b (1.5~2분, TTS명: "솔라") - 한국산 Upstage, 납품 가능
   - gemma4:e4b (1분, TTS명: "구글 사기가") - 정확하고 빠름
@@ -46,7 +46,7 @@
   - qwen3.5:9b (30~60초, TTS명: "큐쓰리")
   - richardyoung/olmocr2:7b-q8 (1~2분, TTS명: "올름오씨알", 표/레이아웃 특화)
   - gemma4:e4b (범용 fallback)
-- **Translation:** EXAONE (로컬) → Claude API (폴백)
+- **Translation:** Qwen3.5 (로컬) → Claude API (폴백)
 - **Claude Fallback:** claude-haiku-4-5
 
 ### 파일 처리
@@ -104,7 +104,7 @@
     ↓ STT (Speech-to-Text)
 사용자 입력 (한국어 텍스트)
     ↓
-LLM 처리 (exaone3.5 or Claude)
+LLM 처리 (qwen3.5 or Claude)
     ↓ 응답 텍스트
 TTS (Text-to-Speech, Web Speech API ko-KR)
     ↓ 음성 재생
@@ -132,7 +132,7 @@ STT로 모델 번호 선택
     ↓
 선택 모델로 분석 실행
     ↓ 영문 설명 (번역 필요 모델만)
-EXAONE 번역 (로컬) → Claude API 폴백
+Qwen3.5 번역 (로컬) → Claude API 폴백
     ↓ 한국어 설명
 TTS → 음성 재생
 ```
@@ -212,7 +212,7 @@ readvoice-mvp/
 
 ### Voice 대화
 - **입력:** Web Speech API (ko-KR)
-- **처리:** LangChain ChatOllama (exaone3.5)
+- **처리:** LangChain ChatOllama (qwen3.5)
 - **출력:** Web Speech API (ko-KR) TTS
 - **속도 조절:** 1x, 1.2x, 1.5x, 2x (음성 명령 지원)
 
@@ -243,7 +243,7 @@ readvoice-mvp/
 ```env
 # LLM
 LLM_PROVIDER=ollama
-OLLAMA_MODEL=exaone3.5:2.4b
+OLLAMA_MODEL=qwen3.5:4b
 OLLAMA_BASE_URL=http://localhost:11434
 
 # Claude API (폴백 용)

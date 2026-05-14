@@ -377,14 +377,16 @@ async function translateToKorean(
   englishText: string,
   fileName: string
 ): Promise<string> {
-  // EXAONE으로 번역 시도
+  // Qwen3.5로 번역 시도
   try {
     const res = await fetch("http://localhost:11434/api/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "exaone3.5:2.4b",
+        model: "qwen3.5:4b",
         prompt: `아래 영어를 자연스러운 한국어로만 번역해 주세요.
+
+중요: 생각 과정을 절대 출력하지 마세요. 번역 결과만 바로 제시하세요.
 
 반드시 지켜주세요:
 - 한국어로만 출력
@@ -403,14 +405,14 @@ ${englishText}`,
     let result = data.response?.trim()
     const koreanCount = (result?.match(/[가-힣]/g) || []).length
     if (result && koreanCount > 20) {
-      console.log("[번역] EXAONE 성공, 한국어 글자수:", koreanCount)
+      console.log("[번역] Qwen3.5 성공, 한국어 글자수:", koreanCount)
       result = removeEnglishWords(result)
       return result
     } else {
-      console.log("[번역] EXAONE 한국어 부족:", koreanCount, "→ Claude로 전환")
+      console.log("[번역] Qwen3.5 한국어 부족:", koreanCount, "→ Claude로 전환")
     }
   } catch (e) {
-    console.log("[번역] EXAONE 실패:", e)
+    console.log("[번역] Qwen3.5 실패:", e)
   }
 
   // Claude API로 번역
