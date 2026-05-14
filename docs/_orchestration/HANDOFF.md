@@ -50,30 +50,35 @@
 
 ---
 
-## 내일 할 일 (2026-05-14 목요일)
+## 오늘 완료된 작업 (2026-05-14 목요일) ✅
 
-### [우선순위 0] GLM-OCR 삭제 🗑️
-**배경:** 품질 불량 + 중국산 + 납품 불가
+### ✅ [P0] GLM-OCR 삭제 완료
+- `ollama rm glm-ocr` 실행
+- `modules/ocr/gemini.ts`: GLM 모델 정의/프롬프트 제거
+- `CLAUDE.md`: 이미지 모델 5→4개, 문서 OCR 4→3개, PDF 5→4개
+- 커밋: `474cb8d` - feat: GLM-OCR 모델 삭제 완료 (P0)
 
-**작업:**
-```bash
-ollama rm glm-ocr
-```
-
-**코드 제거 (3개 파일):**
-- `modules/ocr/gemini.ts`: GLM 모델 정의 및 프롬프트 제거
-- `app/page.tsx`: "지엘엠" 음성 선택 옵션 제거
-- `CLAUDE.md`: GLM 관련 문서 제거
+### ✅ [P1] SOLAR:10.7b 설치 완료
+- `ollama pull solar:10.7b` 실행 (6.1 GB)
+- `CLAUDE.md`: 이미지 모델 4→5개, 문서 OCR 3→4개, PDF 4→5개
+- TTS명: "솔라", 성능: 1.5~2분 추정
+- 커밋: `a743ad7` - feat: SOLAR:10.7b 한국산 모델 설치 완료 (P1)
 
 ---
 
-### [우선순위 1] SOLAR:10.7b 설치 🇰🇷
-**배경:** 한국산 Upstage 모델, Apache 2.0 라이선스, 납품 가능
+## 다음에 할 일 (계정 전환 후)
+
+### [우선순위 2] EXAONE → Qwen3.5:3b 교체 🔄
+**배경:** 번역/대화 모델 개선
 
 **작업:**
-```bash
-ollama pull solar:10.7b
-```
+1. `.env.local` 파일에서 `OLLAMA_MODEL` 변경
+   ```
+   OLLAMA_MODEL=qwen3.5:3b
+   ```
+2. `CLAUDE.md` 파일에서 모델 목록 업데이트
+   - EXAONE 제거
+   - qwen3.5:3b 추가
 
 ---
 

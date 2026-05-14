@@ -1,65 +1,55 @@
 # 작업 인계 (Account Handoff)
 
 ## 현재 상태
-- **날짜:** 2026-05-13 (화요일) 18:30
+- **날짜:** 2026-05-14 (목요일) 오후
 - **버전:** v2.9.0 ✅ (Phase 2 완성)
 - **브랜치:** master
-- **Git 상태:** fc570d7 커밋 완료
-- **최근 커밋:** fc570d7 - feat: daily-report.ps1에 로드맵 PPTX 자동 생성 추가
+- **Git 상태:** a743ad7 커밋 완료
+- **최근 커밋:** a743ad7 - feat: SOLAR:10.7b 한국산 모델 설치 완료 (P1)
 
 ## 최근 커밋 (오늘 작업)
 ```
-fc570d7 - feat: daily-report.ps1에 로드맵 PPTX 자동 생성 추가 ⭐ (최종)
-07b1d06 - fix: daily-report.ps1 PS5.1 호환성 수정
-8209455 - docs: 일일 보고서 자동 생성 (2026-05-13)
-4bd4386 - docs: 2026-05-13 일일 보고서 자동 생성
-2b1bcb2 - docs: HANDOFF.md 업데이트 - Phase 2 완성, Phase 3 준비
-269a32c - chore: v2.9.0 버전 저장 - Phase 2 완성
-415e00d - feat: 이미지 8종 프롬프트 + UX 30초 절약 + 흐름 정리
-19cd3c0 - feat: 음성 명령 다시/멈춰 구현 완료
-ec4251c - fix: 파일 선택 보안 강화 - 경로 노출/크기 제한/인젝션 방지
-c98e57e - feat: CI 추가 + orchestration 폴더 + Codex 리뷰 + IYE:V2V 전환 준비
+a743ad7 - feat: SOLAR:10.7b 한국산 모델 설치 완료 (P1) ⭐ (최종)
+474cb8d - feat: GLM-OCR 모델 삭제 완료 (P0)
+7a8405f - docs: 내일 작업 계획 업데이트 - 모델 교체 테스트
+28d5a23 - docs: 다음주 → 내일(2026-05-14) 업데이트 + 모델 정리 작업 상세화
+5d2401c - docs: HANDOFF.md에 Phase 3 첫 작업 추가 - 모델 정리
+4554f77 - docs: 오늘 마무리 - HANDOFF/save-state/DAILY_ROUTINE 업데이트
 ```
 
-**아침 버전:** 2b1bcb2 (HANDOFF 준비)  
-**저녁 버전:** fc570d7 (일일 보고서 자동화 완성)
+**오전:** 7a8405f (작업 계획 업데이트)  
+**오후:** a743ad7 (P0 GLM 삭제 + P1 SOLAR 설치 완료)
 
-## 오늘 (5월 13일) 완료 작업
+## 오늘 (5월 14일) 완료 작업
 
-### ✅ Phase 2 완전 완성 (v2.9.0)
-- **음성 명령 완성:** 다시/멈춰/일번~오번/천천히/빠르게/처음으로
-- **보안 강화:** Codex Critical 이슈 모두 해결 (경로/크기/인젝션)
-- **이미지 8종 프롬프트:** photo/document/mixed/receipt/namecard/chart/medicine/qrcode
-- **UX 개선:** classifyImage 중복 제거로 30초 절약
-- **인프라 완성:** CI, orchestration 폴더, daily-report.ps1 안정화
+### ✅ [P0] GLM-OCR 모델 삭제 완료
+- **ollama rm glm-ocr** 실행
+- **modules/ocr/gemini.ts:** GLM 모델 정의 및 프롬프트 제거
+  - KOREAN_NATIVE_MODELS 배열에서 제거
+  - GLM_OCR_PROMPT 17줄 삭제
+  - isGlmOCR 변수 및 조건문 제거
+  - timeouts 객체에서 제거
+- **CLAUDE.md:** GLM 관련 문서 전체 제거
+  - 이미지 모델: 5개 → 4개
+  - 문서 OCR: 4개 → 3개
+  - PDF 모델: 5개 → 4개
+  - 음성 명령: "일번~오번" → "일번~사번"
+- **배경:** 품질 불량 + 중국산 + 납품 불가
+- **커밋:** `474cb8d`
 
-### ✅ 일일 보고서 자동화 완성
-- **daily-report.ps1 수정 (3개 커밋)**
-  1. Phase 상태 표시 (save-state.md 덤프 제거)
-  2. 오늘 커밋만 필터링 (날짜 기반)
-  3. PS5.1 호환성 (Join-String → -join, 이모지 → 아스키)
-  4. 로드맵 PPTX 자동 생성 (roadmap_YYYYMMDD.pptx)
-- **생성 파일 4개:**
-  - `docs/daily-reports/YYYY-MM-DD.md` (메인 보고서)
-  - `docs/daily-reports/YYYY-MM-DD-session-summary.md` (세션 요약)
-  - `업무일지/YYYY-MM-DD_업무보고_요약.txt` (외부 폴더)
-  - `docs/daily-reports/roadmap_YYYYMMDD.pptx` (로드맵 프레젠테이션)
+### ✅ [P1] SOLAR:10.7b 한국산 모델 설치 완료
+- **ollama pull solar:10.7b** 실행 (6.1 GB)
+- **CLAUDE.md:** SOLAR 모델 추가
+  - 이미지 모델: 4개 → 5개 (solar 추가)
+  - 문서 OCR: 3개 → 4개 (solar 추가)
+  - PDF 모델: 4개 → 5개 (solar 추가)
+  - 음성 명령: "일번~사번" → "일번~오번"
+- **TTS명:** "솔라"
+- **성능:** 1.5~2분 추정 (실제 테스트 필요)
+- **배경:** 한국산 Upstage, Apache 2.0 라이선스, 납품 가능
+- **커밋:** `a743ad7`
 
-### ✅ 문서화 완성
-- **HANDOFF.md:** Phase 2 완성 내역, Phase 3 준비 사항
-- **DAILY_ROUTINE.md:** 아침/저녁 루틴 표준화 (작성 예정)
-- **save-state.md:** 다음 세션 시작 메시지 업데이트
-
-## 내일 할 일 (2026-05-14 목요일)
-
-### [P0] GLM-OCR 삭제 🗑️
-- [ ] `ollama rm glm-ocr` 실행
-- [ ] `modules/ocr/gemini.ts` - GLM 모델 정의 및 프롬프트 제거
-- [ ] `app/page.tsx` - "지엘엠" 음성 선택 옵션 제거
-- [ ] `CLAUDE.md` - GLM 관련 문서 제거
-
-### [P1] SOLAR:10.7b 설치 🇰🇷
-- [ ] `ollama pull solar:10.7b` 실행
+## 다음 세션 할 일 (계정 전환 후)
 
 ### [P2] EXAONE → Qwen3.5:3b 교체
 - [ ] `.env.local` 파일에서 `OLLAMA_MODEL=qwen3.5:3b` 변경
@@ -103,36 +93,32 @@ https://github.com/nantashin/readvoice-mvp
 - Dev 서버: localhost:3000
 
 ## 핵심 파일 (오늘 수정)
-- `scripts/daily-report.ps1`: Phase 상태, PS5.1 호환, PPTX 생성
-- `scripts/generate-roadmap.js`: 로드맵 PPTX 생성 (변경 없음)
-- `docs/_orchestration/HANDOFF.md`: Phase 2 완성 내역
-- `docs/handoff/save-state.md`: 이 파일 (내일 시작 메시지)
+- `modules/ocr/gemini.ts`: GLM 모델 제거 (P0)
+- `CLAUDE.md`: 모델 목록 업데이트 (GLM 제거, SOLAR 추가)
+- `docs/_orchestration/HANDOFF.md`: P0/P1 완료 표시
+- `docs/handoff/save-state.md`: 이 파일 (계정 전환 후 시작 메시지)
 
 ## 참고 문서
-- 오늘 보고서: `docs/daily-reports/2026-05-13.md`
-- 로드맵 PPTX: `docs/daily-reports/roadmap_20260513.pptx`
+- 오늘 커밋: `474cb8d` (P0), `a743ad7` (P1)
 - 버전 히스토리: `docs/versions/VERSION_HISTORY.md`
 - HANDOFF: `docs/_orchestration/HANDOFF.md`
+- 일일 루틴: `docs/_orchestration/DAILY_ROUTINE.md`
 
 ---
 
-## 📋 내일 아침(2026-05-14) 시작 메시지 (복사용)
+## 📋 계정 전환 후 시작 메시지 (복사용)
 
 ```
-안녕! 내일(2026-05-14 목요일) 시작이야.
+안녕! 계정 전환 후 이어받았어.
 
-docs/_orchestration/HANDOFF.md 읽고 오늘 P0 계획만 먼저 보여줘.
+docs/_orchestration/HANDOFF.md 읽고 P2 계획만 먼저 보여줘.
 
-Phase 2 (v2.9.0) 완성됐어.
-오늘은 Phase 3 시작 전에 모델 교체 작업부터 해야 해.
+Phase 2 (v2.9.0) 완성됐고,
+오늘 오후에 P0/P1 완료했어:
+✅ P0: GLM-OCR 삭제 완료 (474cb8d)
+✅ P1: SOLAR:10.7b 설치 완료 (a743ad7)
 
-[오늘 작업 순서]
-P0: GLM-OCR 삭제
-  - ollama rm glm-ocr
-  - gemini.ts, page.tsx, CLAUDE.md 에서 GLM 제거
-
-P1: SOLAR:10.7b 설치
-  - ollama pull solar:10.7b
+이제 P2부터 재개하자:
 
 P2: EXAONE → Qwen3.5:3b 교체
   - .env.local OLLAMA_MODEL 변경
@@ -146,22 +132,22 @@ P4: lib/llm/router.ts 에 DEPLOY_MODE 분기 설계
   - public: qwen, gemma, llama
   - enterprise: solar, claude API
 
-가장 먼저 P0부터 시작하자!
+P2부터 시작하자!
 ```
 
 ---
 
-## 🌙 저녁 마무리 체크리스트
+## 🌙 오후 마무리 체크리스트 (계정 전환 전)
 
-오늘 완료:
-- [x] Phase 2 완성 (v2.9.0)
-- [x] 일일 보고서 자동화 안정화
-- [x] HANDOFF/save-state 업데이트
-- [x] DAILY_ROUTINE.md 작성
-- [x] 최종 커밋 및 푸시
+오늘 오후 완료:
+- [x] P0: GLM-OCR 삭제 완료
+- [x] P1: SOLAR:10.7b 설치 완료
+- [x] HANDOFF.md 업데이트 (P0/P1 완료 표시)
+- [x] save-state.md 업데이트 (P2부터 재개)
+- [x] git push origin master
 
-**다음 작업일:** 2026-05-14 (목요일)  
-**다음 목표:** Phase 3 시작 전 모델 정리 (GLM 삭제 → SOLAR 설치)
+**다음 작업:** 계정 전환 후 P2부터 재개  
+**다음 목표:** EXAONE → Qwen3.5:3b 교체
 
 ---
 
