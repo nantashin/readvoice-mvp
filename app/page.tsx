@@ -347,7 +347,6 @@ export default function Home() {
         if (tts.isSpeaking) {
           tts.stop()
           console.log('[스페이스] TTS 중지')
-          return
         }
 
         // 마이크 ON
@@ -372,7 +371,6 @@ export default function Home() {
           console.log('[스페이스] 마이크 OFF (Push-to-Talk)')
           playMicOff()
           stt.stopListening()
-          setMicState("processing")
         }
       }
     }
