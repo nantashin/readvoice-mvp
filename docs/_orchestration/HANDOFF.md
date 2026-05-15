@@ -174,6 +174,27 @@
 
 **원칙 수립:** 앞으로 모든 수정 시 진단 문서 작성 → 승인 → 수정
 
+### ✅ Push-to-Talk 버그 수정 (2차)
+**발견된 버그:**
+1. TTS 재생 중 스페이스바 눌러도 안 멈춤
+2. STT 결과가 handleVoiceResult로 전달 안 됨
+
+**원인 분석:**
+1. keydown에서 `tts.stop()` 후 `return` → 마이크 ON 안 됨
+2. keyup에서 `setMicState("processing")` → STT useEffect 조건 실패
+   - `micStateRef.current === "listening"` 체크 시점에 이미 "processing"
+   - 타이밍 이슈
+
+**해결:**
+- keydown: `return` 제거 → TTS 중지 후 마이크 ON 계속 진행
+- keyup: `setMicState("processing")` 제거 → STT useEffect에서 처리
+
+**효과:**
+- TTS 중단 + 마이크 ON 동시 작동
+- STT 결과 정상 처리
+
+**커밋:** `ac2d0f6`
+
 ---
 
 ## 다음에 할 일 (계정 전환 후)
