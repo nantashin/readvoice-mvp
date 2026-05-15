@@ -49,3 +49,6 @@ public/ReadVoice_Upload/*.jpeg
 public/ReadVoice_Upload/*.webp
 public/ReadVoice_Upload/*.pdf
 public/ReadVoice_Upload/*.docx
+
+# TTS 캐시 파일
+public/tts-cache/

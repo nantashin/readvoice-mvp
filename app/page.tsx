@@ -1,7 +1,8 @@
 "use client"
 import { useState, useEffect, useCallback, useRef } from "react"
 import { useSpeechRecognition } from "@/lib/speech/stt"
-import { useSpeechSynthesis, cleanForTTS } from "@/lib/speech/tts"
+import { useTTS } from "@/lib/speech/tts-provider"
+import { cleanForTTS } from "@/lib/speech/tts"
 import { parseSpeedCommand, saveSpeechRate, loadSpeechRate } from "@/lib/speech/speed-control"
 import FileUpload, { IMAGE_MODELS, DOCUMENT_MODELS } from "@/app/components/FileUpload"
 import MicButton from "@/app/components/MicButton"
@@ -80,7 +81,7 @@ export default function Home() {
   const recommendTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const stt = useSpeechRecognition()
-  const tts = useSpeechSynthesis()
+  const tts = useTTS()
 
   const lastSpaceTimeRef = useRef<number>(0)
   const spaceCountRef = useRef<number>(0)
@@ -97,6 +98,15 @@ export default function Home() {
     fetch("/api/watch-folder").catch(() => {
       console.log("[폴더 생성] 실패")
     })
+
+    // TTS 사전 캐시 생성 (백그라운드)
+    if (process.env.NEXT_PUBLIC_TTS_PROVIDER === 'edge') {
+      fetch("/api/tts/cache", { method: "POST" }).then(() => {
+        console.log("[TTS] 사전 캐시 생성 완료")
+      }).catch((e) => {
+        console.log("[TTS] 사전 캐시 생성 실패:", e)
+      })
+    }
 
     // 페이지 포커스 강제 설정
     document.body.focus()
@@ -496,6 +506,43 @@ export default function Home() {
         speak(lastSpoken, speechRate)
       } else {
         speak("다시 들려드릴 내용이 없어요.", speechRate)
+      }
+      return
+    }
+
+    // ── 음성 선택 명령 ──────────────
+    if (/선희|밝은목소리|밝게/.test(t)) {
+      const setVoice = (tts as any).setSelectedVoice
+      if (setVoice) {
+        setVoice('sun-hi')
+        localStorage.setItem('ttsVoice', 'sun-hi')
+        speak("선희 목소리로 바꿨어요", speechRate)
+      } else {
+        speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
+      }
+      return
+    }
+
+    if (/유진|차분한목소리|차분하게/.test(t)) {
+      const setVoice = (tts as any).setSelectedVoice
+      if (setVoice) {
+        setVoice('yu-jin')
+        localStorage.setItem('ttsVoice', 'yu-jin')
+        speak("유진 목소리로 바꿨어요", speechRate)
+      } else {
+        speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
+      }
+      return
+    }
+
+    if (/현수|남자목소리|남성/.test(t)) {
+      const setVoice = (tts as any).setSelectedVoice
+      if (setVoice) {
+        setVoice('hyunsu')
+        localStorage.setItem('ttsVoice', 'hyunsu')
+        speak("현수 목소리로 바꿨어요", speechRate)
+      } else {
+        speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
       }
       return
     }
