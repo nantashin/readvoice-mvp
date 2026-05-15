@@ -47,6 +47,9 @@ class SessionManager {
     this.sessionData = { ...this.sessionData, ...data, endTime: Date.now() }
     console.log("[세션] 분석 완료 - 피드백 대기")
 
+    // 세션 타이머 리셋 (분석 완료 = 활동)
+    this.resetTimer()
+
     // 피드백 타이머
     this.feedbackTimer = setTimeout(() => {
       console.log("[세션] 피드백 없음 - 자동 종료")
@@ -79,6 +82,13 @@ class SessionManager {
       console.error("[세션] 학습 데이터 저장 실패:", e)
     }
 
+    // CustomEvent 발생
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sessionTimeout', {
+        detail: { reason: 'positive_feedback' }
+      }))
+    }
+
     // 즉시 종료
     setTimeout(() => this.endSession(), 2000)
   }
@@ -89,6 +99,14 @@ class SessionManager {
   submitNegativeFeedback(): void {
     if (this.feedbackTimer) clearTimeout(this.feedbackTimer)
     console.log("[세션] 부정 피드백 - 데이터 저장 안 함")
+
+    // CustomEvent 발생
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sessionTimeout', {
+        detail: { reason: 'negative_feedback' }
+      }))
+    }
+
     setTimeout(() => this.endSession(), 2000)
   }
 
@@ -96,7 +114,7 @@ class SessionManager {
    * 세션 종료 및 클리닝
    */
   private endSession(): void {
-    console.log("[세션] 종료 - 클리닝 시작")
+    console.log("[세션] 종료 - 상태 초기화")
 
     // 타이머 정리
     if (this.sessionTimer) clearTimeout(this.sessionTimer)
@@ -109,14 +127,12 @@ class SessionManager {
     // 로컬 스토리지 클리어
     this.clearLocalStorage()
 
-    // 업로드 폴더 정리 요청
-    this.cleanupUploadFolder()
-
-    // 브라우저 상태 초기화 (3초 후 자동 새로고침)
-    setTimeout(() => {
-      console.log("[세션] 자동 새로고침")
-      window.location.reload()
-    }, 3000)
+    // CustomEvent 발생 (app/page.tsx에서 처리)
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sessionTimeout', {
+        detail: { reason: 'timeout' }
+      }))
+    }
   }
 
   /**
@@ -136,23 +152,20 @@ class SessionManager {
     console.log("[세션] 로컬 스토리지 클리어 완료")
   }
 
-  /**
-   * 세션 정리 (로컬 스토리지만 정리, 파일은 삭제 안 함)
-   */
-  private async cleanupUploadFolder(): Promise<void> {
-    try {
-      await fetch("/api/cleanup-session", { method: "POST" })
-      console.log("[세션] 정리 완료 (파일은 유지)")
-    } catch (e) {
-      console.error("[세션] 정리 실패:", e)
-    }
-  }
 
   /**
    * 강제 종료 (사용자가 "종료" 명령)
    */
   forceEnd(): void {
     console.log("[세션] 강제 종료")
+
+    // CustomEvent 발생
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('sessionTimeout', {
+        detail: { reason: 'user_request' }
+      }))
+    }
+
     this.endSession()
   }
 }

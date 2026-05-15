@@ -209,6 +209,7 @@ export default function Home() {
       const { file } = event.detail
       setPendingFile(file)
       setFileType("image")
+      setSelectedModel("gemma4:e4b")  // 새 파일 = 모델 초기화
       setMenuState("model_select")
       setMicState("off")
 
@@ -228,6 +229,7 @@ export default function Home() {
       const { file } = event.detail
       setPendingFile(file)
       setFileType("document")
+      setSelectedModel("gemma4:e4b")  // 새 파일 = 모델 초기화
       setMenuState("model_select")
       setMicState("off")
 
@@ -237,6 +239,61 @@ export default function Home() {
     window.addEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
     return () => window.removeEventListener("pdfScannedSelected", handlePdfScannedSelected as EventListener)
   }, [startListening])
+
+  // 세션 타임아웃 이벤트 리스너
+  useEffect(() => {
+    const handleSessionTimeout = (e: Event) => {
+      const customEvent = e as CustomEvent
+      const reason = customEvent.detail?.reason
+
+      console.log("[세션] 타임아웃 감지:", reason)
+
+      // 음성/BGM 중지
+      window.speechSynthesis.cancel()
+      bgmManager.pause()
+
+      // 상태 초기화 (페이지 리로드 없음!)
+      setResponse("")
+      setPendingFile(null)
+      setSelectedModel("gemma4:e4b")
+      setMenuState("idle")
+      setMicState("off")
+
+      // 사용자에게 안내
+      if (reason === 'timeout') {
+        // 타임아웃: 부드러운 안내
+        speak("오랫동안 조용하셨네요. 계속 사용하시려면 말씀해 주세요.", speechRate, 1.7, () => {
+          setMenuState("main_menu")
+          playMicOn()
+          setTimeout(() => {
+            stt.startListening()
+            setMicState("listening")
+          }, 200)
+
+          // 새 세션 시작
+          sessionManager.startSession()
+        })
+      } else if (reason === 'user_request') {
+        // 사용자 명시적 종료: 감사 인사 후 메인 메뉴
+        setMenuState("main_menu")
+        setTimeout(() => {
+          sessionManager.startSession()
+        }, 3000)
+      } else {
+        // 피드백 후 종료: 메인 메뉴로
+        setMenuState("main_menu")
+        setTimeout(() => {
+          sessionManager.startSession()
+        }, 2000)
+      }
+    }
+
+    window.addEventListener('sessionTimeout', handleSessionTimeout)
+
+    return () => {
+      window.removeEventListener('sessionTimeout', handleSessionTimeout)
+    }
+  }, [speechRate, speak, stt])
 
   // 유튜브 재생 이벤트 처리
   useEffect(() => {
@@ -347,6 +404,13 @@ export default function Home() {
   // 파일명으로 파일 로드
   const loadFileByName = async (fileName: string) => {
     console.log(`[loadFileByName] 시작: ${fileName}`)
+
+    // 타이머 리셋
+    sessionManager.resetTimer()
+
+    // 이전 결과 초기화
+    setResponse("")
+
     try {
       // 추천 타이머 취소
       if (recommendTimerRef.current) {
@@ -398,6 +462,13 @@ export default function Home() {
   // 파일 분석 실행 헬퍼 함수
   const executeAnalysis = useCallback((file: File, modelId: string) => {
     console.log("[executeAnalysis] 파일:", file.name, "모델:", modelId)
+
+    // 분석 시작 = 활동 (타이머 리셋)
+    sessionManager.resetTimer()
+
+    // 이전 분석 결과 초기화
+    setResponse("")
+
     window.dispatchEvent(new CustomEvent("startAnalysis", { detail: { file, model: modelId } }))
     setPendingFile(null)
     setMicState("processing")
