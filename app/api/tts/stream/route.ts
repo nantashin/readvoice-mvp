@@ -1,5 +1,8 @@
 import { spawn } from 'child_process'
 import { NextRequest } from 'next/server'
+import fs from 'fs'
+import path from 'path'
+import { tmpdir } from 'os'
 
 const VOICES: Record<string, string> = {
   'sun-hi': 'ko-KR-SunHiNeural',
@@ -33,8 +36,12 @@ export async function POST(req: NextRequest) {
     return new Promise<Response>((resolve, reject) => {
       const chunks: Buffer[] = []
 
+      // 한글 인코딩 문제 해결: 임시 파일로 저장
+      const tmpFile = path.join(tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`)
+      fs.writeFileSync(tmpFile, text, 'utf8')
+
       const edgeTTS = spawn('edge-tts', [
-        '--text', text,
+        '--file', tmpFile,
         '--voice', voiceName,
         `--rate=${Math.round((finalRate - 1) * 100)}%`,
         '--pitch=+5Hz',
@@ -50,6 +57,13 @@ export async function POST(req: NextRequest) {
       })
 
       edgeTTS.on('close', (code) => {
+        // 임시 파일 삭제
+        try {
+          fs.unlinkSync(tmpFile)
+        } catch (e) {
+          console.error('[Edge TTS] 임시 파일 삭제 실패:', e)
+        }
+
         if (code === 0) {
           const audioBuffer = Buffer.concat(chunks)
           console.log(`[Edge TTS] 생성 완료: ${audioBuffer.length} bytes`)
@@ -67,6 +81,12 @@ export async function POST(req: NextRequest) {
       })
 
       edgeTTS.on('error', (err) => {
+        // 에러 시에도 임시 파일 삭제
+        try {
+          fs.unlinkSync(tmpFile)
+        } catch (e) {
+          console.error('[Edge TTS] 임시 파일 삭제 실패:', e)
+        }
         console.error('[Edge TTS] spawn 에러:', err)
         reject(err)
       })

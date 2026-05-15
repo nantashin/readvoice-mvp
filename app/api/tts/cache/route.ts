@@ -2,6 +2,7 @@ import { spawn } from 'child_process'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import { tmpdir } from 'os'
 
 const CACHE_PHRASES = [
   "안녕하세요, 무엇을 도와드릴까요?",
@@ -19,8 +20,12 @@ const VOICES: Record<string, string> = {
 
 async function generateTTS(text: string, voiceName: string, outputPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    // 한글 인코딩 문제 해결: 임시 파일로 저장
+    const tmpFile = path.join(tmpdir(), `tts_${Date.now()}_${Math.random().toString(36).slice(2)}.txt`)
+    fs.writeFileSync(tmpFile, text, 'utf8')
+
     const edgeTTS = spawn('edge-tts', [
-      '--text', text,
+      '--file', tmpFile,
       '--voice', voiceName,
       '--rate=-5%',
       '--pitch=+5Hz',
@@ -32,6 +37,13 @@ async function generateTTS(text: string, voiceName: string, outputPath: string):
     })
 
     edgeTTS.on('close', (code) => {
+      // 임시 파일 삭제
+      try {
+        fs.unlinkSync(tmpFile)
+      } catch (e) {
+        console.error('[Cache] 임시 파일 삭제 실패:', e)
+      }
+
       if (code === 0) {
         console.log(`[Cache] 생성: ${path.basename(outputPath)}`)
         resolve()
@@ -42,6 +54,12 @@ async function generateTTS(text: string, voiceName: string, outputPath: string):
     })
 
     edgeTTS.on('error', (err) => {
+      // 에러 시에도 임시 파일 삭제
+      try {
+        fs.unlinkSync(tmpFile)
+      } catch (e) {
+        console.error('[Cache] 임시 파일 삭제 실패:', e)
+      }
       console.error('[Cache] spawn error:', err)
       reject(err)
     })

@@ -108,12 +108,6 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
         console.log("[모델] 설치된 모델:", models)
         setAvailableModels(models)
 
-        // GLM-OCR 평가
-        if (models.includes("glm-ocr")) {
-          console.log("[모델] GLM-OCR 사용 가능")
-        } else {
-          console.log("[모델] GLM-OCR 미설치 - 목록에서 제외됨")
-        }
       })
       .catch(() => console.log("[모델] Ollama 연결 실패"))
   }, [])
