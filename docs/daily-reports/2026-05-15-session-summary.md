@@ -1,7 +1,7 @@
-﻿# 세션 요약 — 2026-05-15
+# 세션 요약 — 2026-05-15
 
 ## 작업 시간
-- **생성 시각:** 2026-05-15 16:49:56
+- **생성 시각:** 2026-05-15 17:04:21
 - **현재 버전:** v2.9.0
 - **브랜치:** master
 - **전체 진행률:** 50%
@@ -14,6 +14,8 @@
 [예정] Phase 5: 배포 패키지 (0%) — 키오스크·EXE·서버
 
 ## 오늘의 커밋 ()
+  - 5d7ea5d: docs: 2026-05-15 마무리
+  - f15516c: docs: 일일 보고서 자동 생성 (2026-05-15)
   - 1e58635: feat: Push-to-Talk 전환 + 타임아웃 후 마이크 자동 종료
   - 4244960: fix: TTS 전체 안정화 - 올바른 음성 이름으로 수정
   - 5320f40: docs: README에 접근성 테스트 계획 추가
@@ -34,6 +36,12 @@
   - app/components/FileUpload.tsx
   - app/page.tsx
   - docs/_orchestration/HANDOFF.md
+  - docs/daily-reports/2026-05-15-session-summary.md
+  - docs/daily-reports/2026-05-15.md
+  - "docs/daily-reports/ReadVoicePro_\353\241\234\353\223\234\353\247\265.pdf"
+  - docs/daily-reports/roadmap_20260515.pptx
+  - "docs/daily-reports/~$ReadVoicePro_\353\241\234\353\223\234\353\247\265.pptx"
+  - "docs/daily-reports/\352\263\204\354\240\225 \354\240\204\355\231\230 \354\213\234\354\212\244\355\205\234 \354\231\204\354\204\261.txt"
   - docs/reviews/page-tsx-audit-2026-05-15.md
   - lib/session/session-manager.ts
   - lib/speech/edge-tts.ts
