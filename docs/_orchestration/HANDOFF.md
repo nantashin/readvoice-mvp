@@ -1,6 +1,6 @@
 # Session Handoff
 
-**마지막 업데이트:** 2026-05-14  
+**마지막 업데이트:** 2026-05-15  
 **현재 버전:** v2.9.0 🎉  
 **다음 버전 목표:** v3.0.0 (Phase 3 시작)
 
@@ -74,7 +74,80 @@
 
 ---
 
-## 다음에 할 일 (2026-05-15 이후)
+## 오늘 작업 (2026-05-15 금요일) 🔍
+
+### 🐛 클리닝 버그 분석 완료
+**문제:**
+- 분석 중(processing) 페이지 리로드되어 중단되는 버그
+- npm 로그에 "[클리닝] 세션 정리 시작" 출력
+
+**원인:**
+1. `onAnalysisComplete()`에서 `resetTimer()` 호출 안 함
+2. 분석 시작 후 10분 경과 시 SESSION_TIMEOUT 발동
+3. `endSession()` → `window.location.reload()` → 분석 중단
+
+**해결 계획 수립:**
+- `lib/session/session-manager.ts` 수정
+  - onAnalysisComplete에 resetTimer() 추가
+  - endSession()에서 reload 제거, CustomEvent로 변경
+  - 페이지 리로드 금지, 상태만 초기화
+- `app/page.tsx` 수정
+  - sessionTimeout 이벤트 리스너 추가
+  - 타임아웃 시 "계속 사용하시려면 말씀해 주세요" 안내
+  - executeAnalysis에 resetTimer() 추가
+- 승인 대기 중
+
+### 📋 TTS 개선 계획 수립
+**목표:**
+- Web Speech API → Edge TTS 교체
+- 더 자연스러운 한국어 음성 (Azure 품질)
+
+**선택 가능 음성:**
+- sun-hi (선희): 여성, 밝고 경쾌 (20대 초반)
+- yu-jin (유진): 여성, 차분하고 부드러움 (20대 후반)
+- hyunsu (현수): 남성, 안정적이고 따뜻함 (30대)
+
+**구현 계획:**
+- Python edge-tts 설치
+- /api/tts/generate API 생성
+- lib/speech/edge-tts.ts 훅 생성
+- 음성 명령: "선희 목소리", "유진 목소리", "현수 목소리"
+- 폴백: Edge TTS 실패 시 Web Speech API
+- 승인 대기 중
+
+---
+
+## 다음에 할 일 (계정 전환 후)
+
+### [최우선] 클리닝 버그 수정 🐛
+**배경:** 분석 중 페이지 리로드로 중단되는 치명적 버그
+
+**작업 순서:**
+1. `lib/session/session-manager.ts` 수정
+   - onAnalysisComplete에 resetTimer() 추가
+   - endSession()에서 window.location.reload() 제거
+   - CustomEvent 발생으로 변경
+2. `app/page.tsx` 수정
+   - sessionTimeout 이벤트 리스너 추가
+   - 타임아웃 시 상태만 초기화 (리로드 금지)
+   - executeAnalysis/loadFileByName에 resetTimer() 추가
+3. 빌드 테스트 및 실제 동작 확인
+4. 커밋: "fix: 분석 중 페이지 리로드 버그 수정 (세션 타임아웃 개선)"
+
+---
+
+### [우선순위 2] TTS 개선 - Edge TTS 연동
+**배경:** 더 자연스러운 한국어 TTS 필요
+
+**작업 순서:**
+1. Python edge-tts 설치: `pip install edge-tts`
+2. /api/tts/generate API 생성
+3. lib/speech/edge-tts.ts 훅 생성
+4. app/page.tsx 음성 선택 UI 추가
+5. 음성 명령 처리 ("선희 목소리", "유진 목소리", "현수 목소리")
+6. 테스트 및 커밋
+
+---
 
 ### [P3] 4개 모델 비교 테스트 📊
 **테스트 모델:**
@@ -148,19 +221,25 @@
 
 ---
 
-## 내일 아침(2026-05-15)에 알려줄 것
+## 계정 전환 후 시작 메시지
 
-1. **오늘(05-14) 완료 🎉:**
-   - P0: GLM-OCR 삭제 완료
-   - P1: SOLAR:10.7b 설치 완료 (한국산 모델)
-   - P2: Qwen3.5:4b 번역/대화 모델 교체 완료 (thinking mode 억제 포함)
+1. **오늘(05-15) 작업 완료:**
+   - 🐛 클리닝 버그 원인 분석 완료
+   - 📋 TTS 개선 계획 수립 완료 (Edge TTS)
+   - 코드 수정 대기 중 (승인 필요)
    
-2. **다음 작업 우선순위:**
-   - P3: 4개 모델 비교 테스트 (qwen3.5:4b / solar / gemma4 / llama3.2)
-   - TTS 개선: Web Speech API → Edge TTS (sun-hi/yu-jin/hyunsu)
-   - P4: lib/llm/router.ts DEPLOY_MODE 분기 설계
+2. **즉시 시작 작업 (최우선):**
+   - 🚨 클리닝 버그 수정 (분석 중 페이지 리로드 버그)
+     - lib/session/session-manager.ts 수정
+     - app/page.tsx 수정
+     - 테스트 및 커밋
    
-3. **납품 준비 상태:**
+3. **다음 작업 순서:**
+   - TTS 개선: Edge TTS 연동 (sun-hi/yu-jin/hyunsu)
+   - P3: 4개 모델 비교 테스트
+   - P4: DEPLOY_MODE 분기 설계
+   
+4. **납품 준비 상태:**
    - ❌ 제외: qwen(중국), glm(중국)
    - ✅ 허용: solar(한국), claude API, gemma(Google), llama(Meta)
    - Apache 2.0 라이선스만 납품 가능
