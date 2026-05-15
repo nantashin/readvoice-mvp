@@ -79,13 +79,10 @@ export default function Home() {
   const menuStateRef = useRef<MenuState>("idle")
   const isWaitingSpeedChoiceRef = useRef<boolean>(false)
   const recommendTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const timeoutMicTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const stt = useSpeechRecognition()
   const tts = useTTS()
-
-  const lastSpaceTimeRef = useRef<number>(0)
-  const spaceCountRef = useRef<number>(0)
-  const spaceTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // 초기 설정
   useEffect(() => {
@@ -278,6 +275,14 @@ export default function Home() {
           setTimeout(() => {
             stt.startListening()
             setMicState("listening")
+
+            // 10초 후 자동 종료 타이머
+            timeoutMicTimerRef.current = setTimeout(() => {
+              console.log('[세션] 타임아웃 응답 없음, 마이크 자동 종료')
+              stt.stopListening()
+              setMicState("off")
+              speak("응답이 없어서 마이크를 끕니다.", speechRate)
+            }, 10000)
           }, 200)
 
           // 새 세션 시작
@@ -329,75 +334,57 @@ export default function Home() {
   }, [menuState, speak, speechRate])
 
   // 싱글탭: 현재 동작 중지 + 마이크 ON
-  const handleSingleSpace = useCallback(() => {
-    window.speechSynthesis.cancel()
-
-    if (micStateRef.current === "listening") {
-      // 마이크 ON 상태 → 마이크 끄고 STT 결과 처리
-      stt.stopListening()
-      setMicState("off")
-      playMicOff()
-      return
-    }
-
-    // 안내멘트 없이 띠링 후 즉시 마이크 ON
-    playMicOn()
-    setTimeout(() => {
-      stt.startListening()
-      setMicState("listening")
-    }, 200)
-  }, [stt])
-
-  // 더블탭: 처음 메뉴로
-  const handleDoubleSpace = useCallback(() => {
-    console.log("[handleDoubleSpace] 더블탭 - 메인 메뉴, TTS/BGM 중지")
-    window.speechSynthesis.cancel()
-    bgmManager.pause()
-    stt.stopListening()
-    setMicState("off")
-    setMenuState("main_menu")
-    speak(MAIN_MENU_TTS)
-  }, [stt, speak])
-
-  // 스페이스바 이벤트 등록
+  // 스페이스바 이벤트: Push-to-Talk 방식
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return
+
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault()
+
+        // TTS 재생 중이면 중지
+        if (tts.isSpeaking) {
+          tts.stop()
+          console.log('[스페이스] TTS 중지')
+          return
+        }
+
+        // 마이크 ON
+        console.log('[스페이스] 마이크 ON (Push-to-Talk)')
+        playMicOn()
+        setTimeout(() => {
+          stt.startListening()
+          setMicState("listening")
+        }, 200)
+      }
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (["INPUT", "TEXTAREA", "SELECT"].includes(tag)) return
 
       if (e.code === "Space") {
         e.preventDefault()
 
-        const now = Date.now()
-
-        // 더블탭 감지 (300ms 이내 두 번)
-        if (now - lastSpaceTimeRef.current < 300) {
-          spaceCountRef.current = 2
-          if (spaceTimerRef.current) clearTimeout(spaceTimerRef.current)
-          handleDoubleSpace()
-          lastSpaceTimeRef.current = 0
-          spaceCountRef.current = 0
-          return
+        // 마이크 OFF
+        if (micStateRef.current === "listening") {
+          console.log('[스페이스] 마이크 OFF (Push-to-Talk)')
+          playMicOff()
+          stt.stopListening()
+          setMicState("processing")
         }
-
-        lastSpaceTimeRef.current = now
-        spaceCountRef.current = 1
-
-        // 싱글탭은 300ms 후 처리
-        if (spaceTimerRef.current) clearTimeout(spaceTimerRef.current)
-        spaceTimerRef.current = setTimeout(() => {
-          if (spaceCountRef.current === 1) {
-            console.log("[스페이스] 싱글탭 - 마이크 토글")
-            handleSingleSpace()
-          }
-          spaceCountRef.current = 0
-        }, 300)
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [handleSingleSpace, handleDoubleSpace])
+    window.addEventListener("keyup", handleKeyUp)
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+    }
+  }, [stt, tts])
 
   // STT 결과 처리
   useEffect(() => {
@@ -487,6 +474,13 @@ export default function Home() {
   const handleVoiceResult = async (transcript: string) => {
     const t = transcript.replace(/\s/g, "").toLowerCase()
     console.log("[음성] 입력:", transcript)
+    console.log('[STT처리] 입력값:', t)
+
+    // 타임아웃 마이크 타이머 클리어 (응답이 들어왔으면 취소)
+    if (timeoutMicTimerRef.current) {
+      clearTimeout(timeoutMicTimerRef.current)
+      timeoutMicTimerRef.current = null
+    }
 
     // 사용자 활동 감지 - 타이머 리셋
     sessionManager.resetTimer()
@@ -521,9 +515,11 @@ export default function Home() {
         console.log('[음성선택] 선희로 변경 중...')
         ;(tts as any).setSelectedVoice('sun-hi')
         localStorage.setItem('ttsVoice', 'sun-hi')
+        console.log('[음성선택] speak 호출 직전')
         speak("선희 목소리로 바꿨어요", speechRate)
       } else {
         console.log('[음성선택] Edge TTS 아님, Web Speech API 사용 중')
+        console.log('[음성선택] speak 호출 직전')
         speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
       }
       return
