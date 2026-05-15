@@ -620,14 +620,28 @@ export default function Home() {
         }
       }
 
-      // 파일명으로 선택 (부분 매칭, 공백 무시)
+      // 파일명으로 선택 (부분 매칭, 공백 무시, 유사도 매칭)
       const normalizedInput = transcript.replace(/\s/g, '').toLowerCase()
       const matchedFile = uploadFiles.find(f => {
         const normalizedFileName = f.name.replace(/\s/g, '').toLowerCase()
         const normalizedFileNameNoExt = normalizedFileName.replace(/\.(jpg|jpeg|png|webp|pdf|txt|docx|doc|ppt|pptx)$/i, '')
-        return normalizedFileName.includes(normalizedInput) ||
-               normalizedFileNameNoExt.includes(normalizedInput) ||
-               normalizedInput.includes(normalizedFileNameNoExt)
+
+        // 기존 매칭
+        if (normalizedFileName.includes(normalizedInput) ||
+            normalizedFileNameNoExt.includes(normalizedInput) ||
+            normalizedInput.includes(normalizedFileNameNoExt)) {
+          return true
+        }
+
+        // 유사도 매칭: 입력의 70% 이상이 파일명에 포함되는지 체크
+        let matchCount = 0
+        for (let i = 0; i < normalizedInput.length; i++) {
+          if (normalizedFileNameNoExt.includes(normalizedInput[i])) {
+            matchCount++
+          }
+        }
+        const similarity = matchCount / normalizedInput.length
+        return similarity >= 0.7
       })
 
       if (matchedFile) {
@@ -700,8 +714,9 @@ export default function Home() {
             setMenuState("file_list")
 
             // 파일 목록 읽어주기
+            const numberToKorean = ["일", "이", "삼", "사", "오"]
             const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
-              `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+              `${numberToKorean[i]}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
             ).join(". ")
 
             const message = files.length > 5
@@ -766,8 +781,9 @@ export default function Home() {
             setMenuState("file_list")
 
             // 파일 목록 읽어주기
+            const numberToKorean = ["일", "이", "삼", "사", "오"]
             const fileList = files.slice(0, 5).map((f: UploadFile, i: number) =>
-              `${i + 1}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
+              `${numberToKorean[i]}번. ${f.name.replace(/\.(jpg|jpeg|png|webp|pdf)$/i, '')}`
             ).join(". ")
 
             const message = files.length > 5
