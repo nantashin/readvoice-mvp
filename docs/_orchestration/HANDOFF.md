@@ -74,78 +74,125 @@
 
 ---
 
-## 오늘 작업 (2026-05-15 금요일) 🔍
+## 오늘 완료된 작업 (2026-05-15 금요일) ✅
 
-### 🐛 클리닝 버그 분석 완료
-**문제:**
-- 분석 중(processing) 페이지 리로드되어 중단되는 버그
-- npm 로그에 "[클리닝] 세션 정리 시작" 출력
+### ✅ [최우선] 세션 타임아웃 리로드 버그 수정 완료
+**문제:** 분석 중 페이지 리로드로 중단되는 치명적 버그
 
-**원인:**
-1. `onAnalysisComplete()`에서 `resetTimer()` 호출 안 함
-2. 분석 시작 후 10분 경과 시 SESSION_TIMEOUT 발동
-3. `endSession()` → `window.location.reload()` → 분석 중단
-
-**해결 계획 수립:**
-- `lib/session/session-manager.ts` 수정
+**해결:**
+- `lib/session/session-manager.ts`
   - onAnalysisComplete에 resetTimer() 추가
-  - endSession()에서 reload 제거, CustomEvent로 변경
-  - 페이지 리로드 금지, 상태만 초기화
-- `app/page.tsx` 수정
+  - endSession()에서 window.location.reload() 제거
+  - CustomEvent 발생으로 변경
+- `app/page.tsx`
   - sessionTimeout 이벤트 리스너 추가
-  - 타임아웃 시 "계속 사용하시려면 말씀해 주세요" 안내
-  - executeAnalysis에 resetTimer() 추가
-- 승인 대기 중
+  - 타임아웃 시 상태만 초기화 (리로드 금지)
+  - "계속 사용하시려면 말씀해 주세요" 안내
 
-### 📋 TTS 개선 계획 수립
-**목표:**
-- Web Speech API → Edge TTS 교체
-- 더 자연스러운 한국어 음성 (Azure 품질)
+**커밋:** 다수 (세션 관리, TTS 통합)
 
-**선택 가능 음성:**
-- sun-hi (선희): 여성, 밝고 경쾌 (20대 초반)
-- yu-jin (유진): 여성, 차분하고 부드러움 (20대 후반)
-- hyunsu (현수): 남성, 안정적이고 따뜻함 (30대)
+### ✅ Edge TTS 전면 도입 완료
+**구현 완료:**
+- edge-tts Python 패키지 설치
+- `/api/tts/stream` 스트리밍 API 생성
+- `/api/tts/cache` 캐시 생성 API
+- `lib/speech/edge-tts.ts` 훅 구현
+- `lib/speech/tts-provider.ts` 프로바이더 선택
+- 한글 인코딩 문제 해결 (임시 파일 방식)
 
-**구현 계획:**
-- Python edge-tts 설치
-- /api/tts/generate API 생성
-- lib/speech/edge-tts.ts 훅 생성
-- 음성 명령: "선희 목소리", "유진 목소리", "현수 목소리"
-- 폴백: Edge TTS 실패 시 Web Speech API
-- 승인 대기 중
+**음성:**
+- ✅ sun-hi (선희): ko-KR-SunHiNeural
+- ✅ in-joon (인준): ko-KR-InJoonNeural
+- ❌ yu-jin, hyunsu: 존재하지 않는 음성 이름 (제거)
+
+**음성 선택 명령어:**
+- "선희 목소리" 또는 "밝은 목소리"
+- "인준 목소리" 또는 "남자 목소리"
+
+**폴백:** Edge TTS 실패 시 Web Speech API 자동 전환
+
+**안정화:**
+- 캐시 생성 실패 시 개별 스킵 (전체 500 에러 방지)
+- 스트리밍 실패 시 폴백
+- FileUpload.tsx TTS 통일 (useSpeechSynthesis → useTTS)
+
+**커밋:** `be09c9f`, `9a860f9`, `4244960`
+
+### ✅ Push-to-Talk 전환 완료
+**변경 사항:**
+- 스페이스바 누르고 있는 동안만 음성 입력 (워키토키 방식)
+- 더블탭 기능 제거 (handleSingleSpace, handleDoubleSpace 삭제)
+- TTS 재생 중 스페이스바 = 즉시 중지
+- keydown: 마이크 ON, keyup: 마이크 OFF
+
+**Ref 정리:**
+- 삭제: lastSpaceTimeRef, spaceCountRef, spaceTimerRef
+- 추가: timeoutMicTimerRef
+
+**효과:**
+- 실수로 주변 소리 입력되는 문제 해결
+- 더 직관적인 UX
+
+**커밋:** `1e58635`
+
+### ✅ 타임아웃 후 STT 자동 종료
+**구현:**
+- 세션 타임아웃 안내 후 10초 대기
+- 응답 없으면 마이크 자동 OFF
+- "응답이 없어서 마이크를 끕니다" 안내
+- handleVoiceResult에서 타이머 자동 클리어
+
+**효과:**
+- 주변 소리 무한 입력 방지
+- 배터리/리소스 절약
+
+**커밋:** `1e58635`
+
+### ✅ README 전면 개편
+**변경:**
+- Next.js 기본 템플릿 내용 전부 삭제
+- IYE:V2V 서비스 소개 문서로 재작성
+- 핵심 사용자, 3단계 서비스 구조, 현재 기능 명시
+- 안전 정책 및 납품 원칙 문서화
+- 접근성 테스트 계획 추가
+
+**커밋:** `eef99e8`, `5320f40`
+
+### ✅ GLM 잔여 코드 완전 제거
+**제거:**
+- FileUpload.tsx: GLM-OCR 미설치 로그 제거
+- 모든 GLM 관련 참조 삭제
+
+**커밋:** `9a860f9`
+
+### ✅ 진단 문서 작성
+**파일:** `docs/reviews/page-tsx-audit-2026-05-15.md`
+- app/page.tsx 전체 구조 분석 (470줄 handleVoiceResult 포함)
+- 절대 건드리면 안 되는 부분 명시
+- Push-to-Talk 수정 시 영향 분석
+- 타임아웃 핸들러 수정 시 영향 분석
+
+**원칙 수립:** 앞으로 모든 수정 시 진단 문서 작성 → 승인 → 수정
 
 ---
 
 ## 다음에 할 일 (계정 전환 후)
 
-### [최우선] 클리닝 버그 수정 🐛
-**배경:** 분석 중 페이지 리로드로 중단되는 치명적 버그
+### [최우선] Push-to-Talk 실제 테스트 🧪
+**테스트 항목:**
+- [ ] 스페이스바 누르는 동안만 마이크 ON
+- [ ] 스페이스바 뗄 때 마이크 OFF + STT 처리
+- [ ] TTS 재생 중 스페이스바 = 즉시 중지
+- [ ] INPUT/TEXTAREA에서는 작동 안 함
+- [ ] 타임아웃 후 10초 안에 응답 → 정상 처리
+- [ ] 타임아웃 후 10초 후 응답 없음 → 자동 종료
 
-**작업 순서:**
-1. `lib/session/session-manager.ts` 수정
-   - onAnalysisComplete에 resetTimer() 추가
-   - endSession()에서 window.location.reload() 제거
-   - CustomEvent 발생으로 변경
-2. `app/page.tsx` 수정
-   - sessionTimeout 이벤트 리스너 추가
-   - 타임아웃 시 상태만 초기화 (리로드 금지)
-   - executeAnalysis/loadFileByName에 resetTimer() 추가
-3. 빌드 테스트 및 실제 동작 확인
-4. 커밋: "fix: 분석 중 페이지 리로드 버그 수정 (세션 타임아웃 개선)"
+**비상 복구:** `git revert 4244960` (TTS 안정화 전으로 복구)
 
----
-
-### [우선순위 2] TTS 개선 - Edge TTS 연동
-**배경:** 더 자연스러운 한국어 TTS 필요
-
-**작업 순서:**
-1. Python edge-tts 설치: `pip install edge-tts`
-2. /api/tts/generate API 생성
-3. lib/speech/edge-tts.ts 훅 생성
-4. app/page.tsx 음성 선택 UI 추가
-5. 음성 명령 처리 ("선희 목소리", "유진 목소리", "현수 목소리")
-6. 테스트 및 커밋
+**절대 건드리지 말 것:**
+- handleVoiceResult 함수 내부 (470줄)
+- speak() 함수 시그니처
+- 세션 타이머 로직
 
 ---
 
@@ -223,26 +270,34 @@
 
 ## 계정 전환 후 시작 메시지
 
-1. **오늘(05-15) 작업 완료:**
-   - 🐛 클리닝 버그 원인 분석 완료
-   - 📋 TTS 개선 계획 수립 완료 (Edge TTS)
-   - 코드 수정 대기 중 (승인 필요)
+1. **오늘(05-15) 작업 완료 ✅:**
+   - ✅ 세션 타임아웃 리로드 버그 수정
+   - ✅ Edge TTS 전면 도입 (선희/인준 음성)
+   - ✅ Push-to-Talk 전환 (keydown/keyup 방식)
+   - ✅ 타임아웃 후 STT 10초 자동 종료
+   - ✅ README 전면 개편 (IYE:V2V 서비스 소개)
+   - ✅ GLM 잔여 코드 완전 제거
+   - ✅ 진단 문서 작성 (docs/reviews/page-tsx-audit-2026-05-15.md)
    
 2. **즉시 시작 작업 (최우선):**
-   - 🚨 클리닝 버그 수정 (분석 중 페이지 리로드 버그)
-     - lib/session/session-manager.ts 수정
-     - app/page.tsx 수정
-     - 테스트 및 커밋
+   - 🧪 Push-to-Talk 실제 테스트
+   - Edge TTS 음성 테스트 (선희/인준)
+   - 타임아웃 자동 종료 테스트
    
 3. **다음 작업 순서:**
-   - TTS 개선: Edge TTS 연동 (sun-hi/yu-jin/hyunsu)
-   - P3: 4개 모델 비교 테스트
+   - P3: 4개 모델 비교 테스트 (qwen3.5, solar, gemma4, llama3.2)
    - P4: DEPLOY_MODE 분기 설계
+   - Phase 3 시작: 웹 검색 기능 설계
    
 4. **납품 준비 상태:**
-   - ❌ 제외: qwen(중국), glm(중국)
+   - ❌ 제외: qwen(중국), glm(중국) - 이미 삭제됨
    - ✅ 허용: solar(한국), claude API, gemma(Google), llama(Meta)
    - Apache 2.0 라이선스만 납품 가능
+   
+5. **비상 복구:**
+   - 현재 커밋: `1e58635` (Push-to-Talk)
+   - 복구 커밋: `4244960` (TTS 안정화 전)
+   - 명령: `git revert HEAD` 또는 `git revert 4244960`
 
 ---
 
