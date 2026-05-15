@@ -1,6 +1,6 @@
 "use client"
 import { useRef, useState, useEffect } from "react"
-import { useSpeechSynthesis } from "@/lib/speech/tts"
+import { useTTS } from "@/lib/speech/tts-provider"
 import { validateFile, ACCEPT } from "@/lib/file/validator"
 import { compressImage } from "@/lib/file/compressor"
 import { createPreview, cleanupPreview, type PreviewType } from "@/lib/file/preview"
@@ -88,7 +88,7 @@ export default function FileUpload({ onResult, onStatusChange, selectedModel, on
   const [cameraMode, setCameraMode] = useState(false)
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null)
   const [availableModels, setAvailableModels] = useState<string[]>([])
-  const tts = useSpeechSynthesis()
+  const tts = useTTS()
 
   // autoOpen prop으로 파일 선택 창 자동 열기
   useEffect(() => {

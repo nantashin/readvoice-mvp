@@ -36,10 +36,10 @@ export async function POST(req: NextRequest) {
       const edgeTTS = spawn('edge-tts', [
         '--text', text,
         '--voice', voiceName,
-        '--rate', `${Math.round((finalRate - 1) * 100)}%`,
-        '--pitch', '+5Hz',
+        `--rate=${Math.round((finalRate - 1) * 100)}%`,
+        '--pitch=+5Hz',
         '--write-media', '-'
-      ])
+      ], { shell: true })
 
       edgeTTS.stdout.on('data', (chunk) => {
         chunks.push(Buffer.from(chunk))
