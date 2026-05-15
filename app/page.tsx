@@ -511,37 +511,55 @@ export default function Home() {
     }
 
     // ── 음성 선택 명령 ──────────────
-    if (/선희|밝은목소리|밝게/.test(t)) {
-      const setVoice = (tts as any).setSelectedVoice
-      if (setVoice) {
-        setVoice('sun-hi')
+    // 선희 (sun-hi) - 다양한 발음 포함
+    if (/선희|선이|성이|전히|전희|선의|서니|밝은.?목소리|밝게/.test(t)) {
+      console.log('[음성선택] 선희 명령 감지, transcript:', transcript)
+      console.log('[음성선택] tts 객체:', tts)
+      console.log('[음성선택] setSelectedVoice 존재:', 'setSelectedVoice' in tts)
+
+      if ('setSelectedVoice' in tts) {
+        console.log('[음성선택] 선희로 변경 중...')
+        ;(tts as any).setSelectedVoice('sun-hi')
         localStorage.setItem('ttsVoice', 'sun-hi')
         speak("선희 목소리로 바꿨어요", speechRate)
       } else {
+        console.log('[음성선택] Edge TTS 아님, Web Speech API 사용 중')
         speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
       }
       return
     }
 
-    if (/유진|차분한목소리|차분하게/.test(t)) {
-      const setVoice = (tts as any).setSelectedVoice
-      if (setVoice) {
-        setVoice('yu-jin')
+    // 유진 (yu-jin) - 다양한 발음 포함
+    if (/유진|유긴|이진|우진|차분한.?목소리|차분하게/.test(t)) {
+      console.log('[음성선택] 유진 명령 감지, transcript:', transcript)
+      console.log('[음성선택] tts 객체:', tts)
+      console.log('[음성선택] setSelectedVoice 존재:', 'setSelectedVoice' in tts)
+
+      if ('setSelectedVoice' in tts) {
+        console.log('[음성선택] 유진으로 변경 중...')
+        ;(tts as any).setSelectedVoice('yu-jin')
         localStorage.setItem('ttsVoice', 'yu-jin')
         speak("유진 목소리로 바꿨어요", speechRate)
       } else {
+        console.log('[음성선택] Edge TTS 아님, Web Speech API 사용 중')
         speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
       }
       return
     }
 
-    if (/현수|남자목소리|남성/.test(t)) {
-      const setVoice = (tts as any).setSelectedVoice
-      if (setVoice) {
-        setVoice('hyunsu')
+    // 현수 (hyunsu) - 다양한 발음 포함
+    if (/현수|형수|현시|남자.?목소리|남성.?목소리/.test(t)) {
+      console.log('[음성선택] 현수 명령 감지, transcript:', transcript)
+      console.log('[음성선택] tts 객체:', tts)
+      console.log('[음성선택] setSelectedVoice 존재:', 'setSelectedVoice' in tts)
+
+      if ('setSelectedVoice' in tts) {
+        console.log('[음성선택] 현수로 변경 중...')
+        ;(tts as any).setSelectedVoice('hyunsu')
         localStorage.setItem('ttsVoice', 'hyunsu')
         speak("현수 목소리로 바꿨어요", speechRate)
       } else {
+        console.log('[음성선택] Edge TTS 아님, Web Speech API 사용 중')
         speak("음성 변경은 Edge TTS에서만 지원됩니다", speechRate)
       }
       return
