@@ -14,8 +14,7 @@ const CACHE_PHRASES = [
 
 const VOICES: Record<string, string> = {
   'sun-hi': 'ko-KR-SunHiNeural',
-  'yu-jin': 'ko-KR-YuJinNeural',
-  'hyunsu': 'ko-KR-HyunsuNeural'
+  'in-joon': 'ko-KR-InJoonNeural'
 }
 
 async function generateTTS(text: string, voiceName: string, outputPath: string): Promise<void> {
@@ -77,7 +76,7 @@ export async function POST() {
       console.log('[Cache] 디렉토리 생성:', cacheDir)
     }
 
-    const voices = ['sun-hi', 'yu-jin', 'hyunsu']
+    const voices = ['sun-hi', 'in-joon']
     let generated = 0
 
     for (const voice of voices) {
@@ -104,8 +103,8 @@ export async function POST() {
           generated++
           console.log(`[Cache] 성공: ${fileName}`)
         } catch (err) {
-          console.error(`[Cache] 실패: ${fileName}`, err)
-          throw err
+          console.error(`[Cache] 실패 (스킵): ${fileName}`, err)
+          // throw 제거 - 개별 실패 시에도 다음 파일 계속 처리
         }
       }
     }

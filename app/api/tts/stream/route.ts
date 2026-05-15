@@ -6,8 +6,7 @@ import { tmpdir } from 'os'
 
 const VOICES: Record<string, string> = {
   'sun-hi': 'ko-KR-SunHiNeural',
-  'yu-jin': 'ko-KR-YuJinNeural',
-  'hyunsu': 'ko-KR-HyunsuNeural'
+  'in-joon': 'ko-KR-InJoonNeural'
 }
 
 export async function POST(req: NextRequest) {
